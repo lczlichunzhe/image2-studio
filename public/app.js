@@ -77,10 +77,19 @@ const tierToSize = {
   "2k-square": "2048x2048",
   "2k-wide": "2048x1152",
   "4k-wide": "3840x2160",
-  "4k-tall": "2160x3840"
+  "4k-tall": "2160x3840",
+  "xhs-avatar": "400x400",
+  "xhs-profile-bg": "1000x800",
+  "xhs-post-tall": "1242x1660",
+  "xhs-post-square": "1080x1080",
+  "xhs-post-wide": "2560x1440",
+  "xhs-video-tall": "1080x1440",
+  "xhs-video-wide": "1440x1080"
 };
 
 const qualityMultiplier = { low: 0.35, medium: 1, high: 2.6, auto: 1 };
+const maxHistoryItems = 12;
+const maxHistoryStorageChars = 4_200_000;
 
 const promptOptimizeText = {
   balanced: "画面主体清晰，构图平衡，光线自然，细节丰富，材质可信，整体完成度高",
@@ -92,10 +101,27 @@ const promptOptimizeText = {
 
 function loadJson(key, fallback) {
   try {
-    return JSON.parse(localStorage.getItem(key)) ?? fallback;
+    const value = JSON.parse(localStorage.getItem(key)) ?? fallback;
+    return key === "image2.history" && Array.isArray(value) ? normalizeHistory(value) : value;
   } catch {
     return fallback;
   }
+}
+
+function normalizeHistory(items) {
+  return items
+    .filter((item) => item && (item.dataUrl || item.url))
+    .map((item) => ({
+      id: item.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      dataUrl: item.dataUrl || item.url,
+      prompt: item.prompt || "",
+      model: item.model || "unknown",
+      size: item.size || "unknown",
+      quality: item.quality || "auto",
+      format: item.format || inferFormat(item.dataUrl || item.url),
+      createdAt: item.createdAt || new Date().toISOString()
+    }))
+    .slice(0, maxHistoryItems);
 }
 
 function loadSettings() {
@@ -210,6 +236,13 @@ function getSize() {
   const width = clamp(Number(els.width.value), 256, 3840);
   const height = clamp(Number(els.height.value), 256, 3840);
   return `${round16(width)}x${round16(height)}`;
+}
+
+function inferFormat(src) {
+  const match = String(src || "").match(/^data:image\/([^;,]+)/);
+  if (match) return match[1] === "jpeg" ? "jpg" : match[1];
+  const ext = String(src || "").split("?")[0].match(/\.([a-z0-9]+)$/i)?.[1];
+  return ext || "png";
 }
 
 function getModel() {
@@ -361,23 +394,45 @@ function renderResults(images) {
 function addHistory(images) {
   const now = new Date().toISOString();
   const prompt = els.prompt.value.trim();
+  const model = getModel();
+  const size = getSize();
+  const quality = els.quality.value;
+  const format = els.format.value || inferFormat(images[0]?.dataUrl || images[0]?.url);
   const entries = images.map((image) => ({
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     dataUrl: image.dataUrl || image.url,
     prompt,
-    model: els.model.value === "custom" ? els.customModel.value.trim() : els.model.value,
-    size: getSize(),
+    model,
+    size,
+    quality,
+    format,
     createdAt: now
   }));
-  state.history = [...entries, ...state.history].slice(0, 24);
-  try {
-    localStorage.setItem("image2.history", JSON.stringify(state.history));
-  } catch {
-    state.history = state.history.slice(0, 8);
-    localStorage.setItem("image2.history", JSON.stringify(state.history));
-    flashStatus("历史已自动缩减。", true);
-  }
+  state.history = normalizeHistory([...entries, ...state.history]);
+  persistHistory();
   renderHistory();
+}
+
+function persistHistory() {
+  let items = normalizeHistory(state.history);
+  while (items.length) {
+    const json = JSON.stringify(items);
+    if (json.length <= maxHistoryStorageChars) {
+      try {
+        localStorage.setItem("image2.history", json);
+        state.history = items;
+        return true;
+      } catch {
+        items = items.slice(0, -1);
+        continue;
+      }
+    }
+    items = items.slice(0, -1);
+  }
+  state.history = [];
+  localStorage.removeItem("image2.history");
+  flashStatus("历史图片过大，已自动清理旧记录。", true);
+  return false;
 }
 
 function createImageCard(image, kind) {
@@ -391,10 +446,12 @@ function createImageCard(image, kind) {
 
   const src = image.dataUrl || image.url;
   const prompt = image.prompt || els.prompt.value.trim();
+  const meta = [image.model, image.size, image.quality].filter(Boolean).join(" · ");
+  const format = image.format || inferFormat(src);
   img.src = src;
-  text.textContent = prompt || "Image2 Studio";
+  text.textContent = `${prompt || "Image2 Studio"}${meta ? `\n${meta}` : ""}`;
   download.href = src;
-  download.download = `image2-${kind}-${Date.now()}.${els.format.value || "png"}`;
+  download.download = `image2-${kind}-${Date.now()}.${format}`;
   reuse.addEventListener("click", () => {
     els.prompt.value = prompt;
     flashStatus("提示词已复用");
@@ -464,8 +521,8 @@ function resetForm() {
   els.model.value = "gpt-image-2";
   els.customModel.value = "";
   els.count.value = "1";
-  els.size.value = "auto";
-  els.resolutionTier.value = "auto";
+  els.size.value = "1024x1024";
+  els.resolutionTier.value = "1k-square";
   els.quality.value = "auto";
   els.promptOptimize.value = "balanced";
   els.background.value = "auto";
@@ -537,6 +594,7 @@ function bindEvents() {
     state.history = [];
     localStorage.removeItem("image2.history");
     renderHistory();
+    flashStatus("历史已清空");
   });
   els.clearRefs.addEventListener("click", () => {
     state.references = [];
