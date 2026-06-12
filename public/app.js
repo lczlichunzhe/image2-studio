@@ -308,11 +308,23 @@ function setBusy(isBusy) {
     : '<svg><use href="#icon-wand"></use></svg>开始生成';
 }
 
-function getSize() {
+function getTargetSize() {
   if (els.size.value !== "custom") return els.size.value;
   const width = clamp(Number(els.width.value), 256, 3840);
   const height = clamp(Number(els.height.value), 256, 3840);
-  return `${round16(width)}x${round16(height)}`;
+  return `${Math.round(width)}x${Math.round(height)}`;
+}
+
+function getApiSize() {
+  const size = getTargetSize();
+  if (size === "auto") return size;
+  const parsed = parseSize(size);
+  if (!parsed) return size;
+  return `${ceil16(parsed.width)}x${ceil16(parsed.height)}`;
+}
+
+function getSize() {
+  return getTargetSize();
 }
 
 function inferFormat(src) {
@@ -338,9 +350,9 @@ function syncTierToSize() {
 
 function sizePixels(size) {
   if (size === "auto") return 1024 * 1024;
-  const match = String(size).match(/^(\d+)x(\d+)$/);
-  if (!match) return 1024 * 1024;
-  return Number(match[1]) * Number(match[2]);
+  const parsed = parseSize(size);
+  if (!parsed) return 1024 * 1024;
+  return parsed.width * parsed.height;
 }
 
 function getProviderBillingTier(size) {
@@ -356,13 +368,15 @@ function getProviderBillingTier(size) {
 function updateCostEstimate() {
   const model = getModel() || "自定义模型";
   const size = getSize();
+  const apiSize = getApiSize();
   const count = getCount();
   const quality = els.quality.value || "auto";
-  const pixelRatio = sizePixels(size) / (1024 * 1024);
+  const pixelRatio = sizePixels(apiSize) / (1024 * 1024);
   const q = qualityMultiplier[quality] || 1;
   const relative = Math.max(0.1, pixelRatio * q * count);
   const label = size === "auto" ? "自动尺寸" : size;
-  const billingTier = getProviderBillingTier(size);
+  const apiHint = apiSize !== size ? `接口尺寸 ${apiSize}，生成后处理为 ${size}。` : "";
+  const billingTier = getProviderBillingTier(apiSize);
   const tierPrice = providerTierPrices[billingTier];
   const providerHint = billingTier === "auto"
     ? "服务商计费档：自动判定，生成前无法精确预估。"
@@ -370,12 +384,22 @@ function updateCostEstimate() {
   const officialHint = model.startsWith("gpt-image")
     ? "这里按你当前供应商的 1K/2K/4K 阶梯估算，最终以账单为准。"
     : "第三方接口价格以服务商为准。";
-  els.costEstimate.textContent = `费用预估：${label} · ${quality} · ${count} 张，${providerHint} 像素/质量相对量约 ${relative.toFixed(2)}x。${officialHint}`;
+  els.costEstimate.textContent = `费用预估：${label} · ${quality} · ${count} 张，${apiHint}${providerHint} 像素/质量相对量约 ${relative.toFixed(2)}x。${officialHint}`;
 }
 
 function clamp(value, min, max) {
   if (Number.isNaN(value)) return min;
   return Math.min(max, Math.max(min, value));
+}
+
+function parseSize(size) {
+  const match = String(size || "").match(/^(\d+)x(\d+)$/);
+  if (!match) return null;
+  return { width: Number(match[1]), height: Number(match[2]) };
+}
+
+function ceil16(value) {
+  return clamp(Math.ceil(value / 16) * 16, 256, 3840);
 }
 
 function getCount() {
@@ -404,7 +428,7 @@ function buildPayload() {
     model,
     prompt: buildPrompt(),
     n: getCount(),
-    size: getSize(),
+    size: getApiSize(),
     quality: els.quality.value,
     background: els.background.value,
     output_format: outputFormat,
@@ -471,8 +495,9 @@ async function generateImages() {
     }
     const images = (data.data || []).filter((item) => item.dataUrl || item.url);
     if (!images.length) throw new Error("接口没有返回图片。");
-    renderResults(images);
-    const historySaved = await addHistory(images);
+    const processedImages = await resizeImagesToTarget(images);
+    renderResults(processedImages);
+    const historySaved = await addHistory(processedImages);
     const historyNote = historySaved ? "" : " 图片已生成，但浏览器历史空间不足，未保存到历史。";
     flashStatus(`完成：${images.length} 张图片。${els.costEstimate.textContent.replace("费用预估：", "")}${historyNote}`, !historySaved);
   } catch (error) {
@@ -486,6 +511,45 @@ function renderResults(images) {
   els.results.innerHTML = "";
   for (const image of images) {
     els.results.appendChild(createImageCard(image, "result"));
+  }
+}
+
+async function resizeImagesToTarget(images) {
+  const targetSize = getTargetSize();
+  const apiSize = getApiSize();
+  if (targetSize === "auto" || targetSize === apiSize) return images;
+  const target = parseSize(targetSize);
+  if (!target) return images;
+  return Promise.all(images.map((image) => resizeImageToTarget(image, target, apiSize)));
+}
+
+async function resizeImageToTarget(image, target, apiSize) {
+  const src = image.dataUrl || image.url;
+  if (!src) return image;
+  try {
+    const response = await fetch(src);
+    const blob = await response.blob();
+    const bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement("canvas");
+    canvas.width = target.width;
+    canvas.height = target.height;
+    const context = canvas.getContext("2d");
+    context.drawImage(bitmap, 0, 0, target.width, target.height);
+    if (typeof bitmap.close === "function") bitmap.close();
+    const format = els.format.value || inferFormat(src);
+    const mime = format === "jpg" || format === "jpeg" ? "image/jpeg" : `image/${format}`;
+    const quality = clamp(Number(els.compression.value) / 100, 0, 1);
+    const dataUrl = mime === "image/png" ? canvas.toDataURL(mime) : canvas.toDataURL(mime, quality);
+    return {
+      ...image,
+      dataUrl,
+      url: undefined,
+      apiSize,
+      size: `${target.width}x${target.height}`,
+      format: inferFormat(dataUrl)
+    };
+  } catch {
+    return image;
   }
 }
 
