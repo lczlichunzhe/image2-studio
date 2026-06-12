@@ -88,6 +88,7 @@ const tierToSize = {
 };
 
 const qualityMultiplier = { low: 0.35, medium: 1, high: 2.6, auto: 1 };
+const providerTierPrices = { "1K": 0.6, "2K": 0.8, "4K": 1 };
 const maxHistoryItems = 12;
 const maxHistoryStorageChars = 4_200_000;
 
@@ -266,6 +267,16 @@ function sizePixels(size) {
   return Number(match[1]) * Number(match[2]);
 }
 
+function getProviderBillingTier(size) {
+  if (size === "auto") return "auto";
+  const match = String(size).match(/^(\d+)x(\d+)$/);
+  if (!match) return "auto";
+  const longEdge = Math.max(Number(match[1]), Number(match[2]));
+  if (longEdge <= 1024) return "1K";
+  if (longEdge <= 2048) return "2K";
+  return "4K";
+}
+
 function updateCostEstimate() {
   const model = getModel() || "自定义模型";
   const size = getSize();
@@ -275,10 +286,15 @@ function updateCostEstimate() {
   const q = qualityMultiplier[quality] || 1;
   const relative = Math.max(0.1, pixelRatio * q * count);
   const label = size === "auto" ? "自动尺寸" : size;
+  const billingTier = getProviderBillingTier(size);
+  const tierPrice = providerTierPrices[billingTier];
+  const providerHint = billingTier === "auto"
+    ? "服务商计费档：自动判定，生成前无法精确预估。"
+    : `服务商计费档：预计 ${billingTier}${tierPrice ? `，约 $${(tierPrice * count).toFixed(2)} / ${count} 张` : ""}。`;
   const officialHint = model.startsWith("gpt-image")
-    ? "官方通常按图像 token/质量/尺寸计费，最终以账单为准。"
+    ? "这里按你当前供应商的 1K/2K/4K 阶梯估算，最终以账单为准。"
     : "第三方接口价格以服务商为准。";
-  els.costEstimate.textContent = `费用预估：${label} · ${quality} · ${count} 张，约为 1K medium 单张的 ${relative.toFixed(2)}x。${officialHint}`;
+  els.costEstimate.textContent = `费用预估：${label} · ${quality} · ${count} 张，${providerHint} 像素/质量相对量约 ${relative.toFixed(2)}x。${officialHint}`;
 }
 
 function clamp(value, min, max) {
