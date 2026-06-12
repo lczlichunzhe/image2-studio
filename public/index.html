@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Image2 Studio</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <svg class="sprite" aria-hidden="true">
+      <symbol id="icon-key" viewBox="0 0 24 24">
+        <circle cx="7.5" cy="15.5" r="4.5"></circle><path d="m11 12 9-9"></path><path d="m16 4 4 4"></path><path d="m14 6 4 4"></path>
+      </symbol>
+      <symbol id="icon-image" viewBox="0 0 24 24">
+        <rect width="18" height="18" x="3" y="3" rx="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"></path>
+      </symbol>
+      <symbol id="icon-upload" viewBox="0 0 24 24">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m17 8-5-5-5 5"></path><path d="M12 3v12"></path>
+      </symbol>
+      <symbol id="icon-download" viewBox="0 0 24 24">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="M7 10l5 5 5-5"></path><path d="M12 15V3"></path>
+      </symbol>
+      <symbol id="icon-copy" viewBox="0 0 24 24">
+        <rect width="14" height="14" x="8" y="8" rx="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>
+      </symbol>
+      <symbol id="icon-trash" viewBox="0 0 24 24">
+        <path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="m19 6-1 14H6L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path>
+      </symbol>
+      <symbol id="icon-refresh" viewBox="0 0 24 24">
+        <path d="M21 12a9 9 0 0 1-15.5 6.2"></path><path d="M3 12A9 9 0 0 1 18.5 5.8"></path><path d="M18 2v4h4"></path><path d="M6 22v-4H2"></path>
+      </symbol>
+      <symbol id="icon-wand" viewBox="0 0 24 24">
+        <path d="M15 4V2"></path><path d="M15 16v-2"></path><path d="M8 9h2"></path><path d="M20 9h2"></path><path d="M17.8 6.2 19.2 4.8"></path><path d="M10.8 13.2 4 20"></path><path d="m14 14 6-6-4-4-6 6Z"></path>
+      </symbol>
+      <symbol id="icon-settings" viewBox="0 0 24 24">
+        <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1A2 2 0 1 1 4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7A2 2 0 1 1 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 1 1 19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.1a2 2 0 1 1 0 4H21a1.7 1.7 0 0 0-1.6 1Z"></path>
+      </symbol>
+    </svg>
+
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark"><svg><use href="#icon-image"></use></svg></span>
+          <div>
+            <h1>Image2 Studio</h1>
+            <p id="connectionText">未绑定 API Key</p>
+          </div>
+        </div>
+        <div class="top-actions">
+          <button class="ghost-button" id="openDocs" type="button">API 文档</button>
+          <button class="icon-button" id="openSettings" type="button" aria-label="绑定 API Key" title="绑定 API Key">
+            <svg><use href="#icon-key"></use></svg>
+          </button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="control-panel">
+          <section class="panel-section">
+            <div class="section-title">
+              <span>模式</span>
+              <span id="modeBadge">文生图</span>
+            </div>
+            <div class="segmented" role="tablist" aria-label="生成模式">
+              <button class="active" id="modeGenerate" type="button">文生图</button>
+              <button id="modeEdit" type="button">图生图</button>
+            </div>
+          </section>
+
+          <section class="panel-section">
+            <label for="prompt">提示词</label>
+            <textarea id="prompt" rows="8" placeholder="一位穿着银色风衣的城市探险者，雨夜霓虹街道，电影感构图，精细材质，真实光影"></textarea>
+            <div class="prompt-row">
+              <select id="preset">
+                <option value="">风格预设</option>
+                <option value="cinematic">电影摄影</option>
+                <option value="product">产品海报</option>
+                <option value="anime">动画插画</option>
+                <option value="interior">室内设计</option>
+                <option value="isometric">等距图标</option>
+              </select>
+              <button class="icon-text" id="polishPrompt" type="button">
+                <svg><use href="#icon-wand"></use></svg>
+                润色
+              </button>
+            </div>
+            <label for="avoid">避免出现</label>
+            <input id="avoid" type="text" placeholder="低清晰度、文字错误、变形手指" />
+          </section>
+
+          <section class="panel-section edit-only hidden">
+            <div class="section-title">
+              <span>参考图</span>
+              <button class="mini-button" id="clearRefs" type="button">清空</button>
+            </div>
+            <label class="dropzone" id="dropRefs">
+              <input id="referenceImages" type="file" accept="image/png,image/jpeg,image/webp" multiple />
+              <svg><use href="#icon-upload"></use></svg>
+              <span>上传图片</span>
+            </label>
+            <div class="thumb-strip" id="refPreview"></div>
+
+            <div class="section-title slim-title">
+              <span>Mask</span>
+              <button class="mini-button" id="clearMask" type="button">移除</button>
+            </div>
+            <label class="dropzone compact">
+              <input id="maskImage" type="file" accept="image/png" />
+              <svg><use href="#icon-upload"></use></svg>
+              <span>上传 PNG</span>
+            </label>
+            <div class="thumb-strip" id="maskPreview"></div>
+          </section>
+
+          <section class="panel-section">
+            <div class="form-grid">
+              <label>
+                模型
+                <select id="model">
+                  <option value="gpt-image-2">gpt-image-2</option>
+                  <option value="gpt-image-1.5">gpt-image-1.5</option>
+                  <option value="gpt-image-1">gpt-image-1</option>
+                  <option value="gpt-image-1-mini">gpt-image-1-mini</option>
+                  <option value="custom">自定义模型</option>
+                </select>
+              </label>
+              <label class="custom-model hidden">
+                模型 ID
+                <input id="customModel" type="text" placeholder="服务商要求的模型名" />
+              </label>
+              <label>
+                数量
+                <input id="count" type="number" min="1" max="4" value="1" />
+              </label>
+              <label>
+                尺寸
+                <select id="size">
+                  <option value="auto">auto</option>
+                  <option value="1024x1024">1024 x 1024</option>
+                  <option value="1536x1024">1536 x 1024</option>
+                  <option value="1024x1536">1024 x 1536</option>
+                  <option value="2048x2048">2048 x 2048</option>
+                  <option value="2048x1152">2048 x 1152</option>
+                  <option value="3840x2160">3840 x 2160</option>
+                  <option value="2160x3840">2160 x 3840</option>
+                  <option value="custom">自定义</option>
+                </select>
+              </label>
+              <label>
+                几 K 档
+                <select id="resolutionTier">
+                  <option value="auto">自动匹配尺寸</option>
+                  <option value="1k-square">1K 方图 1024x1024</option>
+                  <option value="1k-wide">1K 横图 1536x1024</option>
+                  <option value="1k-tall">1K 竖图 1024x1536</option>
+                  <option value="2k-square">2K 方图 2048x2048</option>
+                  <option value="2k-wide">2K 横图 2048x1152</option>
+                  <option value="4k-wide">4K 横图 3840x2160</option>
+                  <option value="4k-tall">4K 竖图 2160x3840</option>
+                </select>
+              </label>
+              <label>
+                质量
+                <select id="quality">
+                  <option value="auto">auto</option>
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                </select>
+              </label>
+              <label>
+                AI 优化
+                <select id="promptOptimize">
+                  <option value="balanced">均衡增强</option>
+                  <option value="precise">精准可控</option>
+                  <option value="cinema">电影质感</option>
+                  <option value="product">商业成片</option>
+                  <option value="raw">不优化</option>
+                </select>
+              </label>
+              <label class="custom-size hidden">
+                宽
+                <input id="width" type="number" min="256" max="3840" step="16" value="1024" />
+              </label>
+              <label class="custom-size hidden">
+                高
+                <input id="height" type="number" min="256" max="3840" step="16" value="1024" />
+              </label>
+              <label>
+                背景
+                <select id="background">
+                  <option value="auto">auto</option>
+                  <option value="opaque">opaque</option>
+                  <option value="transparent">transparent</option>
+                </select>
+              </label>
+              <label>
+                格式
+                <select id="format">
+                  <option value="png">png</option>
+                  <option value="jpeg">jpeg</option>
+                  <option value="webp">webp</option>
+                </select>
+              </label>
+              <label>
+                压缩
+                <input id="compression" type="range" min="0" max="100" value="90" />
+              </label>
+              <label>
+                审核
+                <select id="moderation">
+                  <option value="auto">auto</option>
+                  <option value="low">low</option>
+                </select>
+              </label>
+              <label class="edit-only hidden">
+                保真
+                <select id="inputFidelity">
+                  <option value="auto">auto</option>
+                  <option value="low">low</option>
+                  <option value="high">high</option>
+                </select>
+              </label>
+            </div>
+            <div class="cost-box" id="costEstimate">费用预估：选择模型、尺寸和质量后显示。</div>
+          </section>
+
+          <section class="panel-section run-panel">
+            <button class="primary-button" id="generate" type="button">
+              <svg><use href="#icon-wand"></use></svg>
+              开始生成
+            </button>
+            <button class="icon-button" id="resetForm" type="button" aria-label="重置" title="重置">
+              <svg><use href="#icon-refresh"></use></svg>
+            </button>
+          </section>
+        </aside>
+
+        <section class="stage">
+          <div class="stage-toolbar">
+            <div>
+              <h2>作品</h2>
+              <p id="statusText">准备就绪</p>
+            </div>
+            <div class="toolbar-actions">
+              <button class="ghost-button" id="clearResults" type="button">清空作品</button>
+              <button class="ghost-button" id="clearHistory" type="button">清空历史</button>
+            </div>
+          </div>
+
+          <div class="progress hidden" id="progress">
+            <span></span>
+          </div>
+
+          <div class="result-grid" id="results">
+            <div class="empty-state">
+              <div class="empty-art" aria-hidden="true">
+                <span></span><span></span><span></span><span></span>
+              </div>
+              <h3>等待生成</h3>
+              <p>绑定 API Key 后即可开始。</p>
+            </div>
+          </div>
+
+          <div class="history-block">
+            <div class="stage-toolbar small">
+              <div>
+                <h2>历史</h2>
+                <p id="historyCount">0 条记录</p>
+              </div>
+            </div>
+            <div class="history-grid" id="history"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="settingsDialog">
+      <form method="dialog" class="settings-form">
+        <div class="dialog-header">
+          <div>
+            <h2>接口配置</h2>
+            <p>本机保存一个 Base URL 和对应 Key。</p>
+          </div>
+          <button class="icon-button" value="cancel" aria-label="关闭" type="submit">×</button>
+        </div>
+        <div class="form-grid two">
+          <label>
+            服务名称
+            <input id="providerName" type="text" autocomplete="off" placeholder="OpenAI / 代理站 / 私有服务" />
+          </label>
+          <label>
+            API Base URL
+            <input id="apiBaseUrl" type="url" autocomplete="off" placeholder="https://api.openai.com/v1" />
+          </label>
+        </div>
+        <label>
+          API Key
+          <input id="apiKey" type="password" autocomplete="off" placeholder="sk-... 或服务商提供的 Key" />
+        </label>
+        <div class="form-grid two">
+          <label>
+            Organization
+            <input id="organization" type="text" autocomplete="off" placeholder="可选" />
+          </label>
+          <label>
+            Project
+            <input id="project" type="text" autocomplete="off" placeholder="可选" />
+          </label>
+        </div>
+        <label class="check-row">
+          <input id="rememberKey" type="checkbox" checked />
+          <span>记住这些接口配置</span>
+        </label>
+        <menu class="dialog-actions">
+          <button class="ghost-button" id="forgetKey" type="button">清空 Key</button>
+          <button class="ghost-button" id="testConnection" type="button">测试接口</button>
+          <button class="primary-button" id="saveKey" value="default" type="submit">保存</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <template id="imageCardTemplate">
+      <article class="image-card">
+        <div class="image-frame">
+          <img alt="AI 生成图片" />
+        </div>
+        <div class="card-body">
+          <p></p>
+          <div class="card-actions">
+            <button class="icon-button copy-image" type="button" aria-label="复制图片" title="复制图片">
+              <svg><use href="#icon-copy"></use></svg>
+            </button>
+            <button class="icon-button reuse-prompt" type="button" aria-label="复用提示词" title="复用提示词">
+              <svg><use href="#icon-refresh"></use></svg>
+            </button>
+            <a class="icon-button download-image" aria-label="下载图片" title="下载图片" download="image2-studio.png">
+              <svg><use href="#icon-download"></use></svg>
+            </a>
+          </div>
+        </div>
+      </article>
+    </template>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

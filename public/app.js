@@ -1,0 +1,595 @@
+const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+
+const state = {
+  mode: "generate",
+  references: [],
+  mask: null,
+  history: loadJson("image2.history", []),
+  settings: loadSettings()
+};
+
+const els = {
+  connectionText: $("#connectionText"),
+  openSettings: $("#openSettings"),
+  settingsDialog: $("#settingsDialog"),
+  providerName: $("#providerName"),
+  apiBaseUrl: $("#apiBaseUrl"),
+  apiKey: $("#apiKey"),
+  organization: $("#organization"),
+  project: $("#project"),
+  rememberKey: $("#rememberKey"),
+  saveKey: $("#saveKey"),
+  forgetKey: $("#forgetKey"),
+  testConnection: $("#testConnection"),
+  openDocs: $("#openDocs"),
+  modeGenerate: $("#modeGenerate"),
+  modeEdit: $("#modeEdit"),
+  modeBadge: $("#modeBadge"),
+  prompt: $("#prompt"),
+  avoid: $("#avoid"),
+  preset: $("#preset"),
+  polishPrompt: $("#polishPrompt"),
+  model: $("#model"),
+  customModel: $("#customModel"),
+  count: $("#count"),
+  size: $("#size"),
+  resolutionTier: $("#resolutionTier"),
+  quality: $("#quality"),
+  promptOptimize: $("#promptOptimize"),
+  width: $("#width"),
+  height: $("#height"),
+  background: $("#background"),
+  format: $("#format"),
+  compression: $("#compression"),
+  moderation: $("#moderation"),
+  inputFidelity: $("#inputFidelity"),
+  generate: $("#generate"),
+  resetForm: $("#resetForm"),
+  referenceImages: $("#referenceImages"),
+  maskImage: $("#maskImage"),
+  refPreview: $("#refPreview"),
+  maskPreview: $("#maskPreview"),
+  clearRefs: $("#clearRefs"),
+  clearMask: $("#clearMask"),
+  results: $("#results"),
+  history: $("#history"),
+  historyCount: $("#historyCount"),
+  clearResults: $("#clearResults"),
+  clearHistory: $("#clearHistory"),
+  statusText: $("#statusText"),
+  progress: $("#progress"),
+  costEstimate: $("#costEstimate")
+};
+
+const presets = {
+  cinematic: "电影摄影，35mm 镜头，真实光影，细腻肤色，景深自然，色彩分级克制",
+  product: "高端产品海报，干净布光，清晰边缘，材质真实，商业摄影构图",
+  anime: "精致动画插画，动态姿态，干净线条，丰富表情，高质量背景",
+  interior: "室内设计摄影，自然采光，空间层次清楚，材质细节准确，杂志级构图",
+  isometric: "等距视角图标，清晰轮廓，柔和阴影，模块化结构，现代应用图形"
+};
+
+const tierToSize = {
+  "1k-square": "1024x1024",
+  "1k-wide": "1536x1024",
+  "1k-tall": "1024x1536",
+  "2k-square": "2048x2048",
+  "2k-wide": "2048x1152",
+  "4k-wide": "3840x2160",
+  "4k-tall": "2160x3840"
+};
+
+const qualityMultiplier = { low: 0.35, medium: 1, high: 2.6, auto: 1 };
+
+const promptOptimizeText = {
+  balanced: "画面主体清晰，构图平衡，光线自然，细节丰富，材质可信，整体完成度高",
+  precise: "严格遵循主体、数量、位置、颜色和动作描述，避免额外元素，边缘清晰，结构准确",
+  cinema: "电影摄影感，真实镜头语言，层次光影，景深自然，色彩分级克制，情绪氛围明确",
+  product: "商业成片质感，干净背景，专业布光，产品/主体边缘清晰，材质细节真实，适合展示",
+  raw: ""
+};
+
+function loadJson(key, fallback) {
+  try {
+    return JSON.parse(localStorage.getItem(key)) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function loadSettings() {
+  const local = loadJson("image2.settings", null);
+  const session = loadJsonFrom(sessionStorage, "image2.settings", null);
+  return local || session || {
+    providerName: "OpenAI",
+    apiBaseUrl: "https://api.openai.com/v1",
+    apiKey: "",
+    organization: "",
+    project: "",
+    remember: true
+  };
+}
+
+function loadJsonFrom(storage, key, fallback) {
+  try {
+    return JSON.parse(storage.getItem(key)) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveSettings() {
+  const settings = {
+    providerName: els.providerName.value.trim() || "自定义接口",
+    apiBaseUrl: normalizeBaseUrl(els.apiBaseUrl.value.trim()),
+    apiKey: els.apiKey.value.trim(),
+    organization: els.organization.value.trim(),
+    project: els.project.value.trim(),
+    remember: els.rememberKey.checked
+  };
+  state.settings = settings;
+  localStorage.removeItem("image2.settings");
+  sessionStorage.removeItem("image2.settings");
+  const storage = settings.remember ? localStorage : sessionStorage;
+  storage.setItem("image2.settings", JSON.stringify(settings));
+  updateConnection();
+}
+
+async function testConnection() {
+  const settings = {
+    providerName: els.providerName.value.trim() || "自定义接口",
+    apiBaseUrl: normalizeBaseUrl(els.apiBaseUrl.value.trim()),
+    apiKey: els.apiKey.value.trim(),
+    organization: els.organization.value.trim(),
+    project: els.project.value.trim()
+  };
+  if (!settings.apiKey) {
+    flashStatus("请先填写 API Key。", true);
+    return;
+  }
+  els.testConnection.disabled = true;
+  els.testConnection.textContent = "测试中...";
+  try {
+    const response = await fetch("/api/test", {
+      method: "POST",
+      headers: {
+        "x-api-key": settings.apiKey,
+        "x-api-base-url": settings.apiBaseUrl,
+        "x-openai-organization": settings.organization,
+        "x-openai-project": settings.project
+      }
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || data.details?.error?.message || "接口测试失败。");
+    const models = data.models?.length ? ` 可见模型：${data.models.slice(0, 4).join("、")}` : "";
+    flashStatus(`接口正常。${models}`);
+  } catch (error) {
+    flashStatus(`接口测试失败：${error.message}`, true);
+  } finally {
+    els.testConnection.disabled = false;
+    els.testConnection.textContent = "测试接口";
+  }
+}
+
+function normalizeBaseUrl(value) {
+  return (value || "https://api.openai.com/v1").replace(/\/+$/, "");
+}
+
+function updateConnection() {
+  const key = state.settings.apiKey || "";
+  if (!key) {
+    els.connectionText.textContent = "未绑定 API Key";
+    els.connectionText.classList.add("error-text");
+    return;
+  }
+  const tail = key.slice(-4).padStart(4, "*");
+  els.connectionText.textContent = `${state.settings.providerName || "接口"}：•••• ${tail}`;
+  els.connectionText.classList.remove("error-text");
+}
+
+function setMode(mode) {
+  state.mode = mode;
+  const isEdit = mode === "edit";
+  els.modeGenerate.classList.toggle("active", !isEdit);
+  els.modeEdit.classList.toggle("active", isEdit);
+  els.modeBadge.textContent = isEdit ? "图生图" : "文生图";
+  $$(".edit-only").forEach((el) => el.classList.toggle("hidden", !isEdit));
+}
+
+function setBusy(isBusy) {
+  els.generate.disabled = isBusy;
+  els.progress.classList.toggle("hidden", !isBusy);
+  els.generate.innerHTML = isBusy
+    ? "<span>生成中...</span>"
+    : '<svg><use href="#icon-wand"></use></svg>开始生成';
+}
+
+function getSize() {
+  if (els.size.value !== "custom") return els.size.value;
+  const width = clamp(Number(els.width.value), 256, 3840);
+  const height = clamp(Number(els.height.value), 256, 3840);
+  return `${round16(width)}x${round16(height)}`;
+}
+
+function getModel() {
+  return els.model.value === "custom"
+    ? els.customModel.value.trim()
+    : els.model.value;
+}
+
+function syncTierToSize() {
+  const size = tierToSize[els.resolutionTier.value];
+  if (!size) return;
+  els.size.value = size;
+  toggleCustomSize();
+  updateCostEstimate();
+}
+
+function sizePixels(size) {
+  if (size === "auto") return 1024 * 1024;
+  const match = String(size).match(/^(\d+)x(\d+)$/);
+  if (!match) return 1024 * 1024;
+  return Number(match[1]) * Number(match[2]);
+}
+
+function updateCostEstimate() {
+  const model = getModel() || "自定义模型";
+  const size = getSize();
+  const count = clamp(Number(els.count.value), 1, 4);
+  const quality = els.quality.value || "auto";
+  const pixelRatio = sizePixels(size) / (1024 * 1024);
+  const q = qualityMultiplier[quality] || 1;
+  const relative = Math.max(0.1, pixelRatio * q * count);
+  const label = size === "auto" ? "自动尺寸" : size;
+  const officialHint = model.startsWith("gpt-image")
+    ? "官方通常按图像 token/质量/尺寸计费，最终以账单为准。"
+    : "第三方接口价格以服务商为准。";
+  els.costEstimate.textContent = `费用预估：${label} · ${quality} · ${count} 张，约为 1K medium 单张的 ${relative.toFixed(2)}x。${officialHint}`;
+}
+
+function clamp(value, min, max) {
+  if (Number.isNaN(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+function round16(value) {
+  return Math.round(value / 16) * 16;
+}
+
+function buildPrompt() {
+  const prompt = els.prompt.value.trim();
+  const avoid = els.avoid.value.trim();
+  const optimize = promptOptimizeText[els.promptOptimize.value] || "";
+  const positive = optimize && !prompt.includes(optimize)
+    ? `${prompt}，${optimize}`
+    : prompt;
+  return avoid ? `${positive}\n\nAvoid: ${avoid}` : positive;
+}
+
+function buildPayload() {
+  const outputFormat = els.format.value;
+  const model = getModel();
+  const payload = {
+    model,
+    prompt: buildPrompt(),
+    n: clamp(Number(els.count.value), 1, 4),
+    size: getSize(),
+    quality: els.quality.value,
+    background: els.background.value,
+    output_format: outputFormat,
+    moderation: els.moderation.value
+  };
+  if (outputFormat !== "png") {
+    payload.output_compression = Number(els.compression.value);
+  }
+  if (state.mode === "edit") {
+    payload.images = state.references;
+    if (state.mask) payload.mask = state.mask;
+    if (
+      els.inputFidelity.value !== "auto" &&
+      !["gpt-image-2", "gpt-image-1-mini"].includes(model)
+    ) {
+      payload.input_fidelity = els.inputFidelity.value;
+    }
+  }
+  return payload;
+}
+
+async function generateImages() {
+  const key = state.settings.apiKey;
+  if (!key) {
+    els.settingsDialog.showModal();
+    return;
+  }
+  if (!els.prompt.value.trim()) {
+    flashStatus("请输入提示词。", true);
+    els.prompt.focus();
+    return;
+  }
+  if (state.mode === "edit" && state.references.length === 0) {
+    flashStatus("请上传参考图。", true);
+    return;
+  }
+  if (els.model.value === "custom" && !els.customModel.value.trim()) {
+    flashStatus("请输入自定义模型 ID。", true);
+    els.customModel.focus();
+    return;
+  }
+  if (els.background.value === "transparent" && els.format.value === "jpeg") {
+    flashStatus("透明背景需要 png 或 webp。", true);
+    return;
+  }
+
+  setBusy(true);
+  flashStatus(`正在请求 ${state.settings.providerName || "图像接口"}...`);
+  try {
+    const response = await fetch("/api/images", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": key,
+        "x-api-base-url": state.settings.apiBaseUrl || "https://api.openai.com/v1",
+        "x-openai-organization": state.settings.organization || "",
+        "x-openai-project": state.settings.project || ""
+      },
+      body: JSON.stringify(buildPayload())
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || data.details?.error?.message || "生成失败。");
+    }
+    const images = (data.data || []).filter((item) => item.dataUrl || item.url);
+    if (!images.length) throw new Error("接口没有返回图片。");
+    renderResults(images);
+    addHistory(images);
+    flashStatus(`完成：${images.length} 张图片。${els.costEstimate.textContent.replace("费用预估：", "")}`);
+  } catch (error) {
+    flashStatus(error.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function renderResults(images) {
+  els.results.innerHTML = "";
+  for (const image of images) {
+    els.results.appendChild(createImageCard(image, "result"));
+  }
+}
+
+function addHistory(images) {
+  const now = new Date().toISOString();
+  const prompt = els.prompt.value.trim();
+  const entries = images.map((image) => ({
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    dataUrl: image.dataUrl || image.url,
+    prompt,
+    model: els.model.value === "custom" ? els.customModel.value.trim() : els.model.value,
+    size: getSize(),
+    createdAt: now
+  }));
+  state.history = [...entries, ...state.history].slice(0, 24);
+  try {
+    localStorage.setItem("image2.history", JSON.stringify(state.history));
+  } catch {
+    state.history = state.history.slice(0, 8);
+    localStorage.setItem("image2.history", JSON.stringify(state.history));
+    flashStatus("历史已自动缩减。", true);
+  }
+  renderHistory();
+}
+
+function createImageCard(image, kind) {
+  const template = $("#imageCardTemplate").content.cloneNode(true);
+  const card = template.querySelector(".image-card");
+  const img = template.querySelector("img");
+  const text = template.querySelector("p");
+  const download = template.querySelector(".download-image");
+  const reuse = template.querySelector(".reuse-prompt");
+  const copy = template.querySelector(".copy-image");
+
+  const src = image.dataUrl || image.url;
+  const prompt = image.prompt || els.prompt.value.trim();
+  img.src = src;
+  text.textContent = prompt || "Image2 Studio";
+  download.href = src;
+  download.download = `image2-${kind}-${Date.now()}.${els.format.value || "png"}`;
+  reuse.addEventListener("click", () => {
+    els.prompt.value = prompt;
+    flashStatus("提示词已复用");
+  });
+  copy.addEventListener("click", () => copyImage(src));
+  card.dataset.kind = kind;
+  return card;
+}
+
+async function copyImage(src) {
+  try {
+    if (!navigator.clipboard || !window.ClipboardItem) {
+      await navigator.clipboard.writeText(src);
+      flashStatus("已复制图片地址");
+      return;
+    }
+    const blob = await (await fetch(src)).blob();
+    await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+    flashStatus("图片已复制");
+  } catch {
+    await navigator.clipboard.writeText(src);
+    flashStatus("已复制图片地址");
+  }
+}
+
+function renderHistory() {
+  els.history.innerHTML = "";
+  els.historyCount.textContent = `${state.history.length} 条记录`;
+  for (const item of state.history) {
+    els.history.appendChild(createImageCard(item, "history"));
+  }
+}
+
+function flashStatus(message, isError = false) {
+  els.statusText.textContent = message;
+  els.statusText.classList.toggle("error-text", isError);
+}
+
+function renderFilePreview(container, files) {
+  container.innerHTML = "";
+  for (const file of files) {
+    const img = document.createElement("img");
+    img.src = file.dataUrl;
+    img.alt = file.name || "reference";
+    container.appendChild(img);
+  }
+}
+
+async function readFiles(fileList, limit = 6) {
+  const files = Array.from(fileList || []).slice(0, limit);
+  return Promise.all(files.map(readFile));
+}
+
+function readFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({ name: file.name, type: file.type, dataUrl: reader.result });
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function resetForm() {
+  els.prompt.value = "";
+  els.avoid.value = "";
+  els.preset.value = "";
+  els.model.value = "gpt-image-2";
+  els.customModel.value = "";
+  els.count.value = "1";
+  els.size.value = "auto";
+  els.resolutionTier.value = "auto";
+  els.quality.value = "auto";
+  els.promptOptimize.value = "balanced";
+  els.background.value = "auto";
+  els.format.value = "png";
+  els.compression.value = "90";
+  els.moderation.value = "auto";
+  els.inputFidelity.value = "auto";
+  state.references = [];
+  state.mask = null;
+  renderFilePreview(els.refPreview, []);
+  renderFilePreview(els.maskPreview, []);
+  toggleCustomSize();
+  toggleCustomModel();
+  updateCostEstimate();
+  flashStatus("已重置");
+}
+
+function toggleCustomSize() {
+  const show = els.size.value === "custom";
+  $$(".custom-size").forEach((el) => el.classList.toggle("hidden", !show));
+}
+
+function toggleCustomModel() {
+  const show = els.model.value === "custom";
+  $$(".custom-model").forEach((el) => el.classList.toggle("hidden", !show));
+  updateCostEstimate();
+}
+
+function bindEvents() {
+  els.openSettings.addEventListener("click", () => {
+    hydrateSettingsForm();
+    els.settingsDialog.showModal();
+  });
+  els.openDocs.addEventListener("click", () => {
+    window.open("https://platform.openai.com/docs/guides/image-generation?lang=curl", "_blank", "noopener");
+  });
+  els.saveKey.addEventListener("click", saveSettings);
+  els.testConnection.addEventListener("click", testConnection);
+  els.forgetKey.addEventListener("click", () => {
+    state.settings = { ...state.settings, apiKey: "" };
+    hydrateSettingsForm();
+    saveSettings();
+    updateConnection();
+  });
+  els.modeGenerate.addEventListener("click", () => setMode("generate"));
+  els.modeEdit.addEventListener("click", () => setMode("edit"));
+  els.size.addEventListener("change", () => {
+    if (els.size.value !== tierToSize[els.resolutionTier.value]) {
+      els.resolutionTier.value = "auto";
+    }
+    toggleCustomSize();
+    updateCostEstimate();
+  });
+  els.resolutionTier.addEventListener("change", syncTierToSize);
+  els.count.addEventListener("input", updateCostEstimate);
+  els.quality.addEventListener("change", updateCostEstimate);
+  els.width.addEventListener("input", updateCostEstimate);
+  els.height.addEventListener("input", updateCostEstimate);
+  els.format.addEventListener("change", updateCostEstimate);
+  els.model.addEventListener("change", toggleCustomModel);
+  els.customModel.addEventListener("input", updateCostEstimate);
+  els.generate.addEventListener("click", generateImages);
+  els.resetForm.addEventListener("click", resetForm);
+  els.clearResults.addEventListener("click", () => {
+    els.results.innerHTML = "";
+    flashStatus("作品已清空");
+  });
+  els.clearHistory.addEventListener("click", () => {
+    state.history = [];
+    localStorage.removeItem("image2.history");
+    renderHistory();
+  });
+  els.clearRefs.addEventListener("click", () => {
+    state.references = [];
+    els.referenceImages.value = "";
+    renderFilePreview(els.refPreview, []);
+  });
+  els.clearMask.addEventListener("click", () => {
+    state.mask = null;
+    els.maskImage.value = "";
+    renderFilePreview(els.maskPreview, []);
+  });
+  els.referenceImages.addEventListener("change", async (event) => {
+    state.references = await readFiles(event.target.files, 6);
+    renderFilePreview(els.refPreview, state.references);
+  });
+  els.maskImage.addEventListener("change", async (event) => {
+    const [mask] = await readFiles(event.target.files, 1);
+    state.mask = mask || null;
+    renderFilePreview(els.maskPreview, state.mask ? [state.mask] : []);
+  });
+  els.preset.addEventListener("change", () => {
+    const value = presets[els.preset.value];
+    if (!value) return;
+    els.prompt.value = els.prompt.value.trim()
+      ? `${els.prompt.value.trim()}，${value}`
+      : value;
+  });
+  els.polishPrompt.addEventListener("click", () => {
+    const base = els.prompt.value.trim();
+    if (!base) return;
+    if (base.includes("构图")) {
+      flashStatus("提示词已足够完整");
+      return;
+    }
+    const optimize = promptOptimizeText[els.promptOptimize.value] || promptOptimizeText.balanced;
+    els.prompt.value = `${base}，${optimize}`;
+    flashStatus("提示词已润色");
+  });
+}
+
+function hydrateSettingsForm() {
+  els.providerName.value = state.settings.providerName || "OpenAI";
+  els.apiBaseUrl.value = state.settings.apiBaseUrl || "https://api.openai.com/v1";
+  els.apiKey.value = state.settings.apiKey || "";
+  els.organization.value = state.settings.organization || "";
+  els.project.value = state.settings.project || "";
+  els.rememberKey.checked = state.settings.remember !== false;
+}
+
+bindEvents();
+hydrateSettingsForm();
+updateConnection();
+renderHistory();
+toggleCustomSize();
+toggleCustomModel();
+updateCostEstimate();
