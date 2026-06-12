@@ -5,7 +5,7 @@ const state = {
   mode: "generate",
   references: [],
   mask: null,
-  history: loadJson("image2.history", []),
+  history: [],
   settings: loadSettings()
 };
 
@@ -89,8 +89,8 @@ const tierToSize = {
 
 const qualityMultiplier = { low: 0.35, medium: 1, high: 2.6, auto: 1 };
 const providerTierPrices = { "1K": 0.6, "2K": 0.8, "4K": 1 };
-const maxHistoryItems = 12;
-const maxHistoryStorageChars = 4_200_000;
+const historyDbName = "image2-studio";
+const historyDbStore = "history";
 
 const promptOptimizeText = {
   balanced: "画面主体清晰，构图平衡，光线自然，细节丰富，材质可信，整体完成度高",
@@ -122,7 +122,83 @@ function normalizeHistory(items) {
       format: item.format || inferFormat(item.dataUrl || item.url),
       createdAt: item.createdAt || new Date().toISOString()
     }))
-    .slice(0, maxHistoryItems);
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+}
+
+function openHistoryDb() {
+  return new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) {
+      reject(new Error("当前浏览器不支持 IndexedDB。"));
+      return;
+    }
+    const request = indexedDB.open(historyDbName, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(historyDbStore)) {
+        const store = db.createObjectStore(historyDbStore, { keyPath: "id" });
+        store.createIndex("createdAt", "createdAt");
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("历史数据库打开失败。"));
+  });
+}
+
+function readHistoryFromDb() {
+  return new Promise((resolve, reject) => {
+    openHistoryDb()
+      .then((db) => {
+        const transaction = db.transaction(historyDbStore, "readonly");
+        const store = transaction.objectStore(historyDbStore);
+        const request = store.getAll();
+        request.onsuccess = () => resolve(normalizeHistory(request.result || []));
+        request.onerror = () => reject(request.error || new Error("历史读取失败。"));
+      })
+      .catch(reject);
+  });
+}
+
+function writeHistoryToDb(items) {
+  return new Promise((resolve, reject) => {
+    openHistoryDb()
+      .then((db) => {
+        const transaction = db.transaction(historyDbStore, "readwrite");
+        const store = transaction.objectStore(historyDbStore);
+        for (const item of normalizeHistory(items)) store.put(item);
+        transaction.oncomplete = () => resolve(true);
+        transaction.onerror = () => reject(transaction.error || new Error("历史保存失败。"));
+      })
+      .catch(reject);
+  });
+}
+
+function clearHistoryDb() {
+  return new Promise((resolve, reject) => {
+    openHistoryDb()
+      .then((db) => {
+        const transaction = db.transaction(historyDbStore, "readwrite");
+        transaction.objectStore(historyDbStore).clear();
+        transaction.oncomplete = () => resolve(true);
+        transaction.onerror = () => reject(transaction.error || new Error("历史清空失败。"));
+      })
+      .catch(reject);
+  });
+}
+
+async function initHistory() {
+  const legacy = loadJson("image2.history", []);
+  try {
+    const saved = await readHistoryFromDb();
+    const merged = normalizeHistory([...saved, ...legacy]);
+    if (legacy.length) {
+      await writeHistoryToDb(legacy);
+      localStorage.removeItem("image2.history");
+    }
+    state.history = merged;
+  } catch {
+    state.history = normalizeHistory(legacy);
+  }
+  renderHistory();
 }
 
 function loadSettings() {
@@ -280,7 +356,7 @@ function getProviderBillingTier(size) {
 function updateCostEstimate() {
   const model = getModel() || "自定义模型";
   const size = getSize();
-  const count = clamp(Number(els.count.value), 1, 4);
+  const count = getCount();
   const quality = els.quality.value || "auto";
   const pixelRatio = sizePixels(size) / (1024 * 1024);
   const q = qualityMultiplier[quality] || 1;
@@ -300,6 +376,11 @@ function updateCostEstimate() {
 function clamp(value, min, max) {
   if (Number.isNaN(value)) return min;
   return Math.min(max, Math.max(min, value));
+}
+
+function getCount() {
+  const value = Math.floor(Number(els.count.value));
+  return Number.isFinite(value) && value > 0 ? value : 1;
 }
 
 function round16(value) {
@@ -322,7 +403,7 @@ function buildPayload() {
   const payload = {
     model,
     prompt: buildPrompt(),
-    n: clamp(Number(els.count.value), 1, 4),
+    n: getCount(),
     size: getSize(),
     quality: els.quality.value,
     background: els.background.value,
@@ -391,8 +472,9 @@ async function generateImages() {
     const images = (data.data || []).filter((item) => item.dataUrl || item.url);
     if (!images.length) throw new Error("接口没有返回图片。");
     renderResults(images);
-    addHistory(images);
-    flashStatus(`完成：${images.length} 张图片。${els.costEstimate.textContent.replace("费用预估：", "")}`);
+    const historySaved = await addHistory(images);
+    const historyNote = historySaved ? "" : " 图片已生成，但浏览器历史空间不足，未保存到历史。";
+    flashStatus(`完成：${images.length} 张图片。${els.costEstimate.textContent.replace("费用预估：", "")}${historyNote}`, !historySaved);
   } catch (error) {
     flashStatus(error.message, true);
   } finally {
@@ -407,7 +489,7 @@ function renderResults(images) {
   }
 }
 
-function addHistory(images) {
+async function addHistory(images) {
   const now = new Date().toISOString();
   const prompt = els.prompt.value.trim();
   const model = getModel();
@@ -425,30 +507,19 @@ function addHistory(images) {
     createdAt: now
   }));
   state.history = normalizeHistory([...entries, ...state.history]);
-  persistHistory();
+  const saved = await persistHistory(entries);
   renderHistory();
+  return saved;
 }
 
-function persistHistory() {
-  let items = normalizeHistory(state.history);
-  while (items.length) {
-    const json = JSON.stringify(items);
-    if (json.length <= maxHistoryStorageChars) {
-      try {
-        localStorage.setItem("image2.history", json);
-        state.history = items;
-        return true;
-      } catch {
-        items = items.slice(0, -1);
-        continue;
-      }
-    }
-    items = items.slice(0, -1);
+async function persistHistory(entries) {
+  try {
+    await writeHistoryToDb(entries);
+    localStorage.removeItem("image2.history");
+    return true;
+  } catch {
+    return false;
   }
-  state.history = [];
-  localStorage.removeItem("image2.history");
-  flashStatus("历史图片过大，已自动清理旧记录。", true);
-  return false;
 }
 
 function createImageCard(image, kind) {
@@ -606,9 +677,14 @@ function bindEvents() {
     els.results.innerHTML = "";
     flashStatus("作品已清空");
   });
-  els.clearHistory.addEventListener("click", () => {
+  els.clearHistory.addEventListener("click", async () => {
     state.history = [];
     localStorage.removeItem("image2.history");
+    try {
+      await clearHistoryDb();
+    } catch {
+      // The in-memory list is already cleared; keep the UI responsive if storage is blocked.
+    }
     renderHistory();
     flashStatus("历史已清空");
   });
@@ -663,7 +739,7 @@ function hydrateSettingsForm() {
 bindEvents();
 hydrateSettingsForm();
 updateConnection();
-renderHistory();
+initHistory();
 toggleCustomSize();
 toggleCustomModel();
 updateCostEstimate();
