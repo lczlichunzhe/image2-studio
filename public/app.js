@@ -263,12 +263,12 @@ async function testConnection() {
         "x-openai-project": settings.project
       }
     });
-    const data = await response.json();
+    const data = await readJsonResponse(response);
     if (!response.ok) throw new Error(data.error || data.details?.error?.message || "接口测试失败。");
     const models = data.models?.length ? ` 可见模型：${data.models.slice(0, 4).join("、")}` : "";
     flashStatus(`接口正常。${models}`);
   } catch (error) {
-    flashStatus(`接口测试失败：${error.message}`, true);
+    flashStatus(`接口测试失败：${readableLocalFetchError(error)}`, true);
   } finally {
     els.testConnection.disabled = false;
     els.testConnection.textContent = "测试接口";
@@ -489,7 +489,7 @@ async function generateImages() {
       },
       body: JSON.stringify(buildPayload())
     });
-    const data = await response.json();
+    const data = await readJsonResponse(response);
     if (!response.ok) {
       throw new Error(data.error || data.details?.error?.message || "生成失败。");
     }
@@ -501,10 +501,24 @@ async function generateImages() {
     const historyNote = historySaved ? "" : " 图片已生成，但浏览器历史空间不足，未保存到历史。";
     flashStatus(`完成：${images.length} 张图片。${els.costEstimate.textContent.replace("费用预估：", "")}${historyNote}`, !historySaved);
   } catch (error) {
-    flashStatus(error.message, true);
+    flashStatus(readableLocalFetchError(error), true);
   } finally {
     setBusy(false);
   }
+}
+
+async function readJsonResponse(response) {
+  try {
+    return await response.json();
+  } catch {
+    throw new Error("本地服务返回了非 JSON 响应。请确认 npm start 运行的是最新版 Image2 Studio。");
+  }
+}
+
+function readableLocalFetchError(error) {
+  const message = error?.message || "";
+  if (message && message !== "Failed to fetch" && message !== "fetch failed") return message;
+  return "本地服务连接失败：请确认已经在项目文件夹运行 npm install 和 npm start，并打开 http://localhost:4173，而不是直接打开 HTML 文件。";
 }
 
 function renderResults(images) {

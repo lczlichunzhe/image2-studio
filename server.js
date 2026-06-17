@@ -132,6 +132,67 @@ function readableProviderError(text) {
   return cleanText.slice(0, 800);
 }
 
+function safeEndpoint(endpoint) {
+  try {
+    const url = new URL(endpoint);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return "unknown endpoint";
+  }
+}
+
+function providerNetworkError(error, endpoint, label) {
+  const cause = error?.cause || {};
+  const code = cause.code || cause.name || error?.code || error?.name || "NETWORK_ERROR";
+  const target = safeEndpoint(endpoint);
+  let message;
+
+  if (error?.name === "AbortError" || code === "ABORT_ERR") {
+    message = `${label}超时：上游 API 长时间没有响应。请稍后重试，或把数量/尺寸调低后再试。`;
+  } else if (code === "ENOTFOUND") {
+    message = `${label}失败：无法解析 API 域名。请检查 Base URL 是否填错，尤其是域名和 /v1。`;
+  } else if (code === "ECONNREFUSED") {
+    message = `${label}失败：API 服务拒绝连接。请确认 Base URL 端口/协议正确，服务商接口正在运行。`;
+  } else if (code === "ECONNRESET" || code === "UND_ERR_SOCKET") {
+    message = `${label}失败：上游连接被重置。通常是服务商网络不稳定、代理断开或请求被中途关闭。`;
+  } else if (code === "ETIMEDOUT" || code === "UND_ERR_CONNECT_TIMEOUT") {
+    message = `${label}失败：连接上游 API 超时。请检查网络、代理或稍后重试。`;
+  } else if (
+    code === "SELF_SIGNED_CERT_IN_CHAIN" ||
+    code === "DEPTH_ZERO_SELF_SIGNED_CERT" ||
+    code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE" ||
+    code === "CERT_HAS_EXPIRED"
+  ) {
+    message = `${label}失败：HTTPS 证书校验失败。请更换有效 HTTPS Base URL，或联系服务商修复证书。`;
+  } else {
+    message = `${label}失败：本地服务无法连接上游 API。请点“测试接口”确认 Base URL、Key、网络和服务商兼容性。`;
+  }
+
+  const wrapped = new Error(message);
+  wrapped.status = 502;
+  wrapped.details = {
+    endpoint: target,
+    code,
+    cause: error?.message || String(error || "")
+  };
+  return wrapped;
+}
+
+async function fetchProvider(endpoint, options, label, timeoutMs = 180000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(endpoint, {
+      ...options,
+      signal: controller.signal
+    });
+  } catch (error) {
+    throw providerNetworkError(error, endpoint, label);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function dataUrlToBlob(file) {
   if (!file || typeof file.dataUrl !== "string") {
     throw Object.assign(new Error("上传图片格式无效。"), { status: 400 });
@@ -178,11 +239,11 @@ async function callOpenAI(req, payload) {
       const { blob, name } = dataUrlToBlob(payload.mask);
       form.append("mask", blob, name);
     }
-    response = await fetch(endpoint, {
+    response = await fetchProvider(endpoint, {
       method: "POST",
       headers,
       body: form
-    });
+    }, "图生图请求");
   } else {
     const body = cleanObject({
       model: payload.model,
@@ -195,14 +256,14 @@ async function callOpenAI(req, payload) {
       output_compression: payload.output_compression,
       moderation: payload.moderation
     });
-    response = await fetch(endpoint, {
+    response = await fetchProvider(endpoint, {
       method: "POST",
       headers: {
         ...headers,
         "content-type": "application/json"
       },
       body: JSON.stringify(body)
-    });
+    }, "文生图请求");
   }
 
   const text = await response.text();
@@ -232,10 +293,11 @@ async function callOpenAI(req, payload) {
 }
 
 async function testProvider(req) {
-  const response = await fetch(providerEndpoint(req, "models"), {
+  const endpoint = providerEndpoint(req, "models");
+  const response = await fetchProvider(endpoint, {
     method: "GET",
     headers: authHeaders(req)
-  });
+  }, "接口测试", 30000);
   const text = await response.text();
   let data;
   try {
