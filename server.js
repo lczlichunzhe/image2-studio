@@ -26,9 +26,22 @@ function sendJson(res, status, payload) {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store"
+    "cache-control": "no-store",
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-headers": "content-type,x-api-key,x-api-base-url,x-openai-organization,x-openai-project"
   });
   res.end(body);
+}
+
+function sendOptions(res) {
+  res.writeHead(204, {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-headers": "content-type,x-api-key,x-api-base-url,x-openai-organization,x-openai-project",
+    "access-control-max-age": "86400"
+  });
+  res.end();
 }
 
 function readBody(req) {
@@ -344,6 +357,11 @@ async function serveStatic(req, res, pathname) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   try {
+    if (req.method === "OPTIONS") {
+      sendOptions(res);
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/api/health") {
       sendJson(res, 200, {
         ok: true,

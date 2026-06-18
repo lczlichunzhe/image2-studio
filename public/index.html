@@ -6,7 +6,7 @@
     <title>Image2 Studio</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body>
+  <body data-theme="curry">
     <svg class="sprite" aria-hidden="true">
       <symbol id="icon-key" viewBox="0 0 24 24">
         <circle cx="7.5" cy="15.5" r="4.5"></circle><path d="m11 12 9-9"></path><path d="m16 4 4 4"></path><path d="m14 6 4 4"></path>
@@ -47,6 +47,13 @@
           </div>
         </div>
         <div class="top-actions">
+          <select class="theme-select" id="themeSelect" aria-label="主题">
+            <option value="curry">Curry Splash</option>
+            <option value="aurora">Aurora Cockpit</option>
+            <option value="clean">Clean Studio</option>
+            <option value="creator">Creator Pink</option>
+          </select>
+          <span class="theme-note">主题不等于提示词</span>
           <button class="ghost-button" id="openDocs" type="button">API 文档</button>
           <button class="icon-button" id="openSettings" type="button" aria-label="绑定 API Key" title="绑定 API Key">
             <svg><use href="#icon-key"></use></svg>
@@ -55,7 +62,29 @@
       </header>
 
       <main class="workspace">
+        <nav class="mode-rail" aria-label="快捷模式">
+          <button class="rail-button active" type="button" data-mode-target="generate" aria-label="文生图" title="文生图">
+            <svg><use href="#icon-wand"></use></svg>
+          </button>
+          <button class="rail-button" type="button" data-mode-target="edit" aria-label="图生图" title="图生图">
+            <svg><use href="#icon-image"></use></svg>
+          </button>
+          <button class="rail-button" type="button" data-scroll-target="history" aria-label="历史" title="历史">
+            <svg><use href="#icon-refresh"></use></svg>
+          </button>
+          <span class="rail-line"></span>
+          <button class="rail-button" type="button" id="quickSettings" aria-label="接口设置" title="接口设置">
+            <svg><use href="#icon-settings"></use></svg>
+          </button>
+        </nav>
         <aside class="control-panel">
+          <div class="cockpit-head">
+            <div>
+              <h2>创作舱</h2>
+              <p>Prompt cockpit · 主题库 · 批量队列</p>
+            </div>
+            <span class="cockpit-badge">Splash</span>
+          </div>
           <section class="panel-section">
             <div class="section-title">
               <span>模式</span>
@@ -154,6 +183,17 @@
                 </select>
               </label>
               <label>
+                尺寸分组
+                <select id="sizeGroup">
+                  <option value="regular">常规尺寸</option>
+                  <option value="xhs">小红书尺寸</option>
+                  <option value="ecommerce">电商尺寸</option>
+                  <option value="social">社媒尺寸</option>
+                  <option value="wallpaper">壁纸尺寸</option>
+                  <option value="favorite">收藏尺寸</option>
+                </select>
+              </label>
+              <label>
                 尺寸预设
                 <select id="resolutionTier">
                   <option value="auto">自动匹配尺寸</option>
@@ -171,6 +211,14 @@
                   <option value="xhs-post-wide">小红书图文封面 横版 2560x1440</option>
                   <option value="xhs-video-tall">小红书视频封面 竖版 1080x1440</option>
                   <option value="xhs-video-wide">小红书视频封面 横版 1440x1080</option>
+                  <option value="ecom-square">电商商品主图 1080x1080</option>
+                  <option value="ecom-detail">电商详情横图 1920x1080</option>
+                  <option value="ecom-poster">电商海报 1080x1920</option>
+                  <option value="social-wechat">公众号头图 900x383</option>
+                  <option value="social-bilibili">B站封面 1146x717</option>
+                  <option value="social-douyin">抖音封面 1080x1920</option>
+                  <option value="wallpaper-phone">手机壁纸 1080x2400</option>
+                  <option value="wallpaper-desktop">电脑壁纸 2560x1440</option>
                 </select>
               </label>
               <label>
@@ -239,6 +287,32 @@
             <div class="cost-box" id="costEstimate">费用预估：选择模型、尺寸和质量后显示。</div>
           </section>
 
+          <section class="panel-section">
+            <div class="section-title">
+              <span>提示词模板库</span>
+              <span>一键填充</span>
+            </div>
+            <div class="template-grid">
+              <button type="button" class="template-chip" data-template="product">产品图</button>
+              <button type="button" class="template-chip" data-template="xhs-cover">小红书封面</button>
+              <button type="button" class="template-chip" data-template="avatar">头像</button>
+              <button type="button" class="template-chip" data-template="video-cover">视频封面</button>
+              <button type="button" class="template-chip" data-template="interior">室内设计</button>
+              <button type="button" class="template-chip" data-template="curry-poster">库里海报</button>
+            </div>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-title">
+              <span>生成策略</span>
+              <span>费用确认</span>
+            </div>
+            <div class="strategy-toggle">
+              <button type="button" class="active" id="economyMode">省钱模式</button>
+              <button type="button" id="qualityMode">高清模式</button>
+            </div>
+          </section>
+
           <section class="panel-section run-panel">
             <button class="primary-button" id="generate" type="button">
               <svg><use href="#icon-wand"></use></svg>
@@ -253,7 +327,7 @@
         <section class="stage">
           <div class="stage-toolbar">
             <div>
-              <h2>作品</h2>
+              <h2>沉浸画布</h2>
               <p id="statusText">准备就绪</p>
             </div>
             <div class="toolbar-actions">
@@ -276,16 +350,56 @@
             </div>
           </div>
 
-          <div class="history-block">
+        </section>
+
+        <aside class="inspector-panel">
+            <div class="inspector-card">
+              <div class="section-title">
+                <span>参数引擎</span>
+                <span>实时</span>
+              </div>
+              <div class="engine-meter">
+                <span>生成能量</span>
+              </div>
+              <div class="engine-row"><b>费用档</b><span id="engineTier">1K / 2K / 4K</span></div>
+              <div class="engine-row"><b>模式</b><span id="engineMode">省钱模式</span></div>
+            </div>
+            <div class="inspector-card">
+              <div class="section-title">
+                <span>批量队列</span>
+                <span>3 条</span>
+              </div>
+              <div class="queue-item"><b>小红书封面</b><span>等待生成</span></div>
+              <div class="queue-item"><b>产品主图</b><span>可加入队列</span></div>
+              <div class="queue-item"><b>头像版本</b><span>可加入队列</span></div>
+            </div>
+            <div class="inspector-card diagnosis-card">
+              <div class="section-title">
+                <span>失败诊断</span>
+                <span>方案</span>
+              </div>
+              <p>上游失败时会显示原因、Base URL 检查、网络建议和可重试参数。</p>
+            </div>
+        </aside>
+
+        <div class="history-block">
             <div class="stage-toolbar small">
               <div>
-                <h2>历史</h2>
+                <h2>历史轨道</h2>
                 <p id="historyCount">0 条记录</p>
+              </div>
+              <div class="history-tools">
+                <input id="historySearch" type="search" placeholder="搜索提示词 / 尺寸 / 模型" />
+                <select id="historyFilter">
+                  <option value="all">全部</option>
+                  <option value="1k">1K</option>
+                  <option value="2k">2K</option>
+                  <option value="today">今天</option>
+                </select>
               </div>
             </div>
             <div class="history-grid" id="history"></div>
-          </div>
-        </section>
+        </div>
       </main>
     </div>
 
@@ -342,6 +456,9 @@
         <div class="card-body">
           <p></p>
           <div class="card-actions">
+            <button class="icon-button view-image" type="button" aria-label="查看大图" title="查看大图">
+              <svg><use href="#icon-image"></use></svg>
+            </button>
             <button class="icon-button copy-image" type="button" aria-label="复制图片" title="复制图片">
               <svg><use href="#icon-copy"></use></svg>
             </button>

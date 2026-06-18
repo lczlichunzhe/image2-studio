@@ -23,6 +23,8 @@ const els = {
   forgetKey: $("#forgetKey"),
   testConnection: $("#testConnection"),
   openDocs: $("#openDocs"),
+  themeSelect: $("#themeSelect"),
+  quickSettings: $("#quickSettings"),
   modeGenerate: $("#modeGenerate"),
   modeEdit: $("#modeEdit"),
   modeBadge: $("#modeBadge"),
@@ -34,6 +36,7 @@ const els = {
   customModel: $("#customModel"),
   count: $("#count"),
   size: $("#size"),
+  sizeGroup: $("#sizeGroup"),
   resolutionTier: $("#resolutionTier"),
   quality: $("#quality"),
   promptOptimize: $("#promptOptimize"),
@@ -55,6 +58,8 @@ const els = {
   results: $("#results"),
   history: $("#history"),
   historyCount: $("#historyCount"),
+  historySearch: $("#historySearch"),
+  historyFilter: $("#historyFilter"),
   clearResults: $("#clearResults"),
   clearHistory: $("#clearHistory"),
   statusText: $("#statusText"),
@@ -84,7 +89,33 @@ const tierToSize = {
   "xhs-post-square": "1080x1080",
   "xhs-post-wide": "2560x1440",
   "xhs-video-tall": "1080x1440",
-  "xhs-video-wide": "1440x1080"
+  "xhs-video-wide": "1440x1080",
+  "ecom-square": "1080x1080",
+  "ecom-detail": "1920x1080",
+  "ecom-poster": "1080x1920",
+  "social-wechat": "900x383",
+  "social-bilibili": "1146x717",
+  "social-douyin": "1080x1920",
+  "wallpaper-phone": "1080x2400",
+  "wallpaper-desktop": "2560x1440"
+};
+
+const sizeGroups = {
+  regular: ["auto", "1k-square", "1k-wide", "1k-tall", "2k-square", "2k-wide", "4k-wide", "4k-tall"],
+  xhs: ["auto", "xhs-avatar", "xhs-profile-bg", "xhs-post-tall", "xhs-post-square", "xhs-post-wide", "xhs-video-tall", "xhs-video-wide"],
+  ecommerce: ["auto", "1k-square", "ecom-square", "ecom-detail", "ecom-poster"],
+  social: ["auto", "social-wechat", "social-bilibili", "social-douyin", "xhs-post-square", "xhs-video-wide"],
+  wallpaper: ["auto", "wallpaper-phone", "wallpaper-desktop", "4k-wide", "4k-tall"],
+  favorite: ["auto", "1k-square", "xhs-avatar", "xhs-post-tall", "ecom-square", "wallpaper-desktop"]
+};
+
+const promptTemplates = {
+  product: "高端产品商业摄影，主体居中，干净背景，柔和棚拍灯光，材质真实，边缘清晰，适合电商主图",
+  "xhs-cover": "小红书封面，顶部留标题空间，主体明确，明亮自然光，画面干净，高级内容封面质感",
+  avatar: "高级头像，面部清晰，背景简洁，柔和光线，细节精致，适合社交媒体头像",
+  "video-cover": "短视频封面，强视觉中心，动态构图，醒目留白，电影感灯光，适合手机竖屏",
+  interior: "室内设计摄影，自然采光，空间层次清楚，材质细节准确，杂志级构图",
+  "curry-poster": "Stephen Curry 库里，Golden State Warriors 金州勇士，#30 球衣，NBA 篮球巨星，三分投篮瞬间，球场聚光灯，电影级运动海报，真实肖像摄影，清晰面部特征，蓝金配色"
 };
 
 const qualityMultiplier = { low: 0.35, medium: 1, high: 2.6, auto: 1 };
@@ -254,7 +285,7 @@ async function testConnection() {
   els.testConnection.disabled = true;
   els.testConnection.textContent = "测试中...";
   try {
-    const response = await fetch("/api/test", {
+    const response = await fetch(apiUrl("/api/test"), {
       method: "POST",
       headers: {
         "x-api-key": settings.apiKey,
@@ -277,6 +308,12 @@ async function testConnection() {
 
 function normalizeBaseUrl(value) {
   return (value || "https://api.openai.com/v1").replace(/\/+$/, "");
+}
+
+function apiUrl(path) {
+  return window.location.protocol === "file:"
+    ? `http://localhost:4173${path}`
+    : path;
 }
 
 function updateConnection() {
@@ -348,6 +385,17 @@ function syncTierToSize() {
   updateCostEstimate();
 }
 
+function syncSizeGroup() {
+  const allowed = sizeGroups[els.sizeGroup?.value] || sizeGroups.regular;
+  Array.from(els.resolutionTier.options).forEach((option) => {
+    option.hidden = !allowed.includes(option.value);
+  });
+  if (!allowed.includes(els.resolutionTier.value)) {
+    els.resolutionTier.value = allowed.includes("1k-square") ? "1k-square" : allowed[0];
+    syncTierToSize();
+  }
+}
+
 function sizePixels(size) {
   if (size === "auto") return 1024 * 1024;
   const parsed = parseSize(size);
@@ -385,6 +433,8 @@ function updateCostEstimate() {
     ? "这里按你当前供应商的 1K/2K/4K 阶梯估算，最终以账单为准。"
     : "第三方接口价格以服务商为准。";
   els.costEstimate.textContent = `费用预估：${label} · ${quality} · ${count} 张，${apiHint}${providerHint} 像素/质量相对量约 ${relative.toFixed(2)}x。${officialHint}`;
+  const engineTier = $("#engineTier");
+  if (engineTier) engineTier.textContent = billingTier === "auto" ? "自动判定" : `${billingTier} · ${apiSize}`;
 }
 
 function clamp(value, min, max) {
@@ -415,12 +465,13 @@ function buildPrompt() {
   const prompt = els.prompt.value.trim();
   const avoid = els.avoid.value.trim();
   const optimize = promptOptimizeText[els.promptOptimize.value] || "";
-  const positive = optimize && !prompt.includes(optimize)
-    ? `${prompt}，${optimize}`
-    : prompt;
+  const curryHint = /库里|柯瑞|curry|stephen\s*curry/i.test(prompt)
+    ? "Stephen Curry, Golden State Warriors, NBA basketball superstar, #30 jersey, elite point guard, basketball court lighting, accurate facial likeness, authentic sports photography"
+    : "";
+  const parts = [prompt, curryHint, optimize].filter((item, index, arr) => item && arr.indexOf(item) === index);
+  const positive = parts.join("，");
   return avoid ? `${positive}\n\nAvoid: ${avoid}` : positive;
 }
-
 function buildPayload() {
   const outputFormat = els.format.value;
   const model = getModel();
@@ -478,7 +529,7 @@ async function generateImages() {
   setBusy(true);
   flashStatus(`正在请求 ${state.settings.providerName || "图像接口"}...`);
   try {
-    const response = await fetch("/api/images", {
+    const response = await fetch(apiUrl("/api/images"), {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -511,14 +562,14 @@ async function readJsonResponse(response) {
   try {
     return await response.json();
   } catch {
-    throw new Error("本地服务返回了非 JSON 响应。请确认 npm start 运行的是最新版 Image2 Studio。");
+    throw new Error("本地服务返回了非 JSON 响应。请确认打开的是 http://localhost:4173，或重新双击“启动生图网站.vbs”。");
   }
 }
 
 function readableLocalFetchError(error) {
   const message = error?.message || "";
   if (message && message !== "Failed to fetch" && message !== "fetch failed") return message;
-  return "本地服务连接失败：请确认已经在项目文件夹运行 npm install 和 npm start，并打开 http://localhost:4173，而不是直接打开 HTML 文件。";
+  return "本地服务连接失败：请双击项目文件夹里的“启动生图网站.vbs”，然后使用 http://localhost:4173。不要只打开 index.html；如果已经启动，请刷新页面重试。";
 }
 
 function renderResults(images) {
@@ -608,13 +659,16 @@ function createImageCard(image, kind) {
   const download = template.querySelector(".download-image");
   const reuse = template.querySelector(".reuse-prompt");
   const copy = template.querySelector(".copy-image");
+  const view = template.querySelector(".view-image");
 
   const src = image.dataUrl || image.url;
   const prompt = image.prompt || els.prompt.value.trim();
   const meta = [image.model, image.size, image.quality].filter(Boolean).join(" · ");
   const format = image.format || inferFormat(src);
   img.src = src;
-  text.textContent = `${prompt || "Image2 Studio"}${meta ? `\n${meta}` : ""}`;
+  text.textContent = kind === "result"
+    ? (meta || prompt || "Image2 Studio")
+    : `${prompt || "Image2 Studio"}${meta ? `\n${meta}` : ""}`;
   download.href = src;
   download.download = `image2-${kind}-${Date.now()}.${format}`;
   reuse.addEventListener("click", () => {
@@ -622,8 +676,146 @@ function createImageCard(image, kind) {
     flashStatus("提示词已复用");
   });
   copy.addEventListener("click", () => copyImage(src));
+  view?.addEventListener("click", () => openImageViewer({ ...image, prompt, src }));
+  img.addEventListener("dblclick", () => openImageViewer({ ...image, prompt, src }));
   card.dataset.kind = kind;
   return card;
+}
+
+function createHistoryThumbLegacy(item) {
+  const src = item.dataUrl || item.url;
+  const button = document.createElement("button");
+  button.className = "history-thumb";
+  button.type = "button";
+  button.title = item.prompt || "历史图片";
+
+  const img = document.createElement("img");
+  img.alt = "历史图片";
+  img.src = src;
+  img.loading = "lazy";
+  img.addEventListener("error", () => {
+    button.classList.add("is-broken");
+  });
+
+  const label = document.createElement("span");
+  label.textContent = item.size || "image";
+
+  button.append(img, label);
+  button.addEventListener("click", () => {
+    renderResults([item]);
+    if (item.prompt) els.prompt.value = item.prompt;
+    flashStatus("已从历史轨道打开图片");
+  });
+  button.addEventListener("dblclick", () => openImageViewer(item));
+  return button;
+}
+
+function createHistoryThumb(item) {
+  const src = item.dataUrl || item.url;
+  const button = document.createElement("button");
+  button.className = "history-thumb";
+  button.type = "button";
+  button.title = item.prompt || "历史图片";
+
+  const img = document.createElement("img");
+  img.alt = "历史图片";
+  img.src = src;
+  img.loading = "lazy";
+  img.addEventListener("error", () => {
+    button.classList.add("is-broken");
+  });
+
+  const info = document.createElement("div");
+  info.className = "history-thumb-info";
+
+  const title = document.createElement("b");
+  title.textContent = shortText(item.prompt || "历史图片", 34);
+
+  const meta = document.createElement("span");
+  meta.textContent = [item.size, item.model, formatHistoryTime(item.createdAt)].filter(Boolean).join(" · ");
+
+  info.append(title, meta);
+  button.append(img, info);
+  button.addEventListener("click", () => {
+    renderResults([item]);
+    if (item.prompt) els.prompt.value = item.prompt;
+    flashStatus("已从历史轨道打开图片");
+  });
+  button.addEventListener("dblclick", () => openImageViewer(item));
+  return button;
+}
+
+function shortText(value, maxLength) {
+  const text = String(value || "").trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function formatHistoryTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  return `${month}-${day} ${hour}:${minute}`;
+}
+
+function openImageViewer(image) {
+  const src = image.src || image.dataUrl || image.url;
+  if (!src) {
+    flashStatus("这条记录没有可查看的图片地址", true);
+    return;
+  }
+
+  let dialog = $("#imageViewerDialog");
+  if (!dialog) {
+    dialog = document.createElement("dialog");
+    dialog.id = "imageViewerDialog";
+    dialog.className = "image-viewer";
+    document.body.appendChild(dialog);
+  }
+
+  const prompt = image.prompt || "Image2 Studio";
+  const meta = [image.model, image.size, image.quality, image.format].filter(Boolean).join(" · ");
+  dialog.innerHTML = `
+    <div class="viewer-shell">
+      <div class="viewer-head">
+        <div>
+          <h2>查看大图</h2>
+          <p>${escapeHtml(meta || prompt)}</p>
+        </div>
+        <div class="viewer-actions">
+          <button class="ghost-button viewer-fit" type="button">适应窗口</button>
+          <button class="ghost-button viewer-actual" type="button">原始尺寸</button>
+          <a class="ghost-button viewer-download" download="image2-full.${image.format || inferFormat(src)}">下载</a>
+          <button class="icon-button viewer-close" type="button" aria-label="关闭">×</button>
+        </div>
+      </div>
+      <div class="viewer-canvas">
+        <img alt="查看大图" />
+      </div>
+    </div>
+  `;
+
+  const canvas = dialog.querySelector(".viewer-canvas");
+  const img = dialog.querySelector("img");
+  const download = dialog.querySelector(".viewer-download");
+  img.src = src;
+  download.href = src;
+  dialog.querySelector(".viewer-fit").addEventListener("click", () => canvas.classList.remove("actual-size"));
+  dialog.querySelector(".viewer-actual").addEventListener("click", () => canvas.classList.add("actual-size"));
+  dialog.querySelector(".viewer-close").addEventListener("click", () => dialog.close());
+  if (!dialog.open) dialog.showModal();
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 async function copyImage(src) {
@@ -644,10 +836,32 @@ async function copyImage(src) {
 
 function renderHistory() {
   els.history.innerHTML = "";
-  els.historyCount.textContent = `${state.history.length} 条记录`;
-  for (const item of state.history) {
-    els.history.appendChild(createImageCard(item, "history"));
+  const query = (els.historySearch?.value || "").trim().toLowerCase();
+  const filter = els.historyFilter?.value || "all";
+  const today = new Date().toISOString().slice(0, 10);
+  const filtered = state.history.filter((item) => {
+    const haystack = [item.prompt, item.size, item.model, item.quality].filter(Boolean).join(" ").toLowerCase();
+    const size = String(item.size || "").toLowerCase();
+    const matchesQuery = !query || haystack.includes(query);
+    const matchesFilter =
+      filter === "all" ||
+      (filter === "1k" && (/1024|1536|1k/.test(size))) ||
+      (filter === "2k" && (/2048|2k/.test(size))) ||
+      (filter === "today" && String(item.createdAt || "").startsWith(today));
+    return matchesQuery && matchesFilter;
+  });
+  els.historyCount.textContent = renderHistoryCountText(state.history.length, filtered.length);
+  for (const item of filtered) {
+    els.history.appendChild(createHistoryThumb(item));
   }
+}
+
+function formatHistoryCount(total, shown) {
+  return `${total} 条记录${shown !== total ? ` / 显示 ${shown}` : ""}`;
+}
+
+function renderHistoryCountText(total, shown) {
+  return `${total} 条记录${shown !== total ? ` / 显示 ${shown}` : ""}`;
 }
 
 function flashStatus(message, isError = false) {
@@ -717,6 +931,14 @@ function toggleCustomModel() {
 }
 
 function bindEvents() {
+  els.themeSelect?.addEventListener("change", () => {
+    document.body.dataset.theme = els.themeSelect.value;
+    localStorage.setItem("image2.theme", els.themeSelect.value);
+  });
+  els.quickSettings?.addEventListener("click", () => {
+    hydrateSettingsForm();
+    els.settingsDialog.showModal();
+  });
   els.openSettings.addEventListener("click", () => {
     hydrateSettingsForm();
     els.settingsDialog.showModal();
@@ -734,6 +956,12 @@ function bindEvents() {
   });
   els.modeGenerate.addEventListener("click", () => setMode("generate"));
   els.modeEdit.addEventListener("click", () => setMode("edit"));
+  $$(".rail-button[data-mode-target]").forEach((button) => {
+    button.addEventListener("click", () => setMode(button.dataset.modeTarget));
+  });
+  $$(".rail-button[data-scroll-target='history']").forEach((button) => {
+    button.addEventListener("click", () => $(".history-block")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  });
   els.size.addEventListener("change", () => {
     if (els.size.value !== tierToSize[els.resolutionTier.value]) {
       els.resolutionTier.value = "auto";
@@ -741,6 +969,7 @@ function bindEvents() {
     toggleCustomSize();
     updateCostEstimate();
   });
+  els.sizeGroup?.addEventListener("change", syncSizeGroup);
   els.resolutionTier.addEventListener("change", syncTierToSize);
   els.count.addEventListener("input", updateCostEstimate);
   els.quality.addEventListener("change", updateCostEstimate);
@@ -749,6 +978,8 @@ function bindEvents() {
   els.format.addEventListener("change", updateCostEstimate);
   els.model.addEventListener("change", toggleCustomModel);
   els.customModel.addEventListener("input", updateCostEstimate);
+  els.historySearch?.addEventListener("input", renderHistory);
+  els.historyFilter?.addEventListener("change", renderHistory);
   els.generate.addEventListener("click", generateImages);
   els.resetForm.addEventListener("click", resetForm);
   els.clearResults.addEventListener("click", () => {
@@ -775,6 +1006,27 @@ function bindEvents() {
     state.mask = null;
     els.maskImage.value = "";
     renderFilePreview(els.maskPreview, []);
+  });
+  $$(".template-chip").forEach((button) => {
+    button.addEventListener("click", () => {
+      const text = promptTemplates[button.dataset.template];
+      if (!text) return;
+      els.prompt.value = els.prompt.value.trim() ? `${els.prompt.value.trim()}，${text}` : text;
+      flashStatus("提示词模板已加入");
+    });
+  });
+  $("#economyMode")?.addEventListener("click", () => {
+    $("#economyMode").classList.add("active");
+    $("#qualityMode")?.classList.remove("active");
+    $("#engineMode").textContent = "省钱模式";
+    if (els.resolutionTier.value === "auto") els.resolutionTier.value = "1k-square";
+    syncTierToSize();
+  });
+  $("#qualityMode")?.addEventListener("click", () => {
+    $("#qualityMode").classList.add("active");
+    $("#economyMode")?.classList.remove("active");
+    $("#engineMode").textContent = "高清模式";
+    flashStatus("高清模式会按目标尺寸请求，费用以服务商账单为准。");
   });
   els.referenceImages.addEventListener("change", async (event) => {
     state.references = await readFiles(event.target.files, 6);
@@ -805,6 +1057,10 @@ function bindEvents() {
   });
 }
 
+function bindMotionEffects() {
+  document.body.classList.add("no-mouse-mode");
+}
+
 function hydrateSettingsForm() {
   els.providerName.value = state.settings.providerName || "OpenAI";
   els.apiBaseUrl.value = state.settings.apiBaseUrl || "https://api.openai.com/v1";
@@ -818,6 +1074,11 @@ bindEvents();
 hydrateSettingsForm();
 updateConnection();
 initHistory();
+const savedTheme = localStorage.getItem("image2.theme") || "curry";
+document.body.dataset.theme = savedTheme;
+if (els.themeSelect) els.themeSelect.value = savedTheme;
+syncSizeGroup();
 toggleCustomSize();
 toggleCustomModel();
 updateCostEstimate();
+bindMotionEffects();
