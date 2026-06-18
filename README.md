@@ -1,34 +1,255 @@
 # Image2 Studio
 
-一个本地运行的 AI 生图网站，支持 OpenAI Images API 兼容接口。  
-可以绑定自己的 `API Base URL` 和 `API Key`，用于文生图、图生图、Mask 局部编辑、尺寸/质量控制和提示词优化。
+一个本地运行的 AI 生图工作台。支持自定义 `API Base URL` 和 `API Key`，可以调用 OpenAI Images API 兼容接口，用来文生图、图生图、管理尺寸、预估费用、保存历史记录。
 
-> 仓库地址：`https://github.com/lczlichunzhe/image2-studio`
+仓库地址：<https://github.com/lczlichunzhe/image2-studio>
 
-## 功能
+## 适合谁用
+
+- 自己电脑本地生图
+- 给朋友发一个项目包，让对方填自己的 API Key 使用
+- 使用 OpenAI 或兼容 OpenAI Images API 的第三方服务商
+
+注意：这个项目不是纯静态网页，不能只打开 `index.html` 完整使用。它需要本地 Node.js 服务来转发 API 请求。
+
+## 主要功能
 
 - 文生图
 - 图生图 / 参考图生成
 - Mask 局部编辑
 - 自定义 API Base URL
 - 自定义 API Key
-- 支持 OpenAI / 兼容 OpenAI Images API 的第三方接口
+- OpenAI / 第三方兼容接口
 - 模型选择：`gpt-image-2`、`gpt-image-1.5`、`gpt-image-1`、`gpt-image-1-mini`、自定义模型
-- 几 K 档选择：1K、2K、4K、横图、竖图、方图
-- 自定义尺寸
-- 质量选择：`auto`、`low`、`medium`、`high`
+- 尺寸分组：常规尺寸、小红书、电商、社媒、壁纸、收藏尺寸
+- 1K / 2K / 4K 档位选择
+- 省钱模式 / 高清模式
 - 输出格式：`png`、`jpeg`、`webp`
-- 输出压缩
-- 背景设置
-- 审核强度
-- 参考图保真度
-- AI 提示词优化：均衡增强、精准可控、电影质感、商业成片、不优化
-- 费用倍率提示：根据尺寸、质量、数量估算相对消耗
-- 接口测试：检查 Base URL 和 Key 是否可用
+- 输出压缩、背景、审核强度、参考图保真度
+- AI 提示词优化
+- 提示词模板库
+- 生成前费用预估
+- 接口测试
+- 失败诊断提示
 - 本地历史记录
-- 下载图片
-- 复制图片
+- 历史搜索与筛选
+- 历史横向轨道
+- 查看大图、下载图片、复制图片、复用提示词
+- Curry Splash / Aurora Cockpit / Clean Studio / Creator Pink 主题切换
+
+## Windows 快速启动
+
+先安装 Node.js 20 或更高版本：<https://nodejs.org/>
+
+然后双击项目文件夹里的：
+
+```text
+启动生图网站.vbs
+```
+
+或：
+
+```text
+启动生图网站.cmd
+```
+
+启动后打开：
+
+```text
+http://localhost:4173
+```
+
+如果页面没有变成最新版，可以按：
+
+```text
+Ctrl + F5
+```
+
+强制刷新浏览器缓存。
+
+## 命令行启动
+
+```bash
+npm start
+```
+
+默认地址：
+
+```text
+http://localhost:4173
+```
+
+健康检查：
+
+```text
+http://localhost:4173/api/health
+```
+
+正常会返回：
+
+```json
+{ "ok": true }
+```
+
+## API 配置
+
+打开网站后，点击右上角钥匙按钮，填写：
+
+```text
+服务名称：OpenAI 或你的服务商名称
+API Base URL：https://api.openai.com/v1
+API Key：你的 API Key
+Organization：可选
+Project：可选
+```
+
+如果你用第三方兼容接口，把 `API Base URL` 改成服务商给你的地址，例如：
+
+```text
+https://example.com/v1
+```
+
+程序会请求：
+
+```text
+https://example.com/v1/images/generations
+https://example.com/v1/images/edits
+```
+
+## 给别人用
+
+把整个项目文件夹发给对方，或者让对方从 GitHub 下载 ZIP。
+
+对方需要做：
+
+1. 安装 Node.js 20 或更高版本
+2. 解压项目
+3. 双击 `启动生图网站.vbs`
+4. 打开 `http://localhost:4173`
+5. 填入自己的 `API Base URL` 和 `API Key`
+
+不要只发 `public/index.html`，那样页面能打开，但生图接口不能正常工作。
+
+## 费用和尺寸说明
+
+页面里的费用预估是辅助判断，不代表最终账单。
+
+实际费用通常由这些因素决定：
+
+- 服务商
+- 模型
+- API 实际请求尺寸
+- 输出尺寸
+- 图片质量
+- 生成数量
+
+如果第三方服务商按 1K / 2K / 4K 档计费，建议优先使用页面里的档位选择和省钱模式。某些服务商会按 API 请求尺寸计费，而不是按前端最终缩放后的图片大小计费。
+
+## 历史记录
+
+生成成功后，图片会保存到当前浏览器的本地历史里。
+
+历史区支持：
+
+- 横向滚动
+- 搜索提示词 / 尺寸 / 模型
+- 按 1K / 2K / 今天筛选
+- 单击历史卡片打开到主画布
+- 双击历史卡片查看大图
 - 复用提示词
+
+历史记录保存在浏览器本地，不会上传到 GitHub。
+
+如果换浏览器、清理浏览器数据、或使用无痕模式，历史可能会消失。
+
+## 常见问题
+
+### 页面打开了，但不能生图
+
+确认你打开的是：
+
+```text
+http://localhost:4173
+```
+
+不要只打开：
+
+```text
+public/index.html
+```
+
+### 提示未绑定 API Key
+
+点击右上角钥匙按钮，填写 `API Base URL` 和 `API Key`，然后保存。
+
+### 接口测试失败
+
+检查：
+
+- API Base URL 是否正确
+- API Key 是否正确
+- Key 是否有图像接口权限
+- 当前网络是否能访问服务商
+- 服务商是否兼容 OpenAI Images API
+
+### 生成失败，但接口测试正常
+
+可能是：
+
+- 模型名不支持
+- 尺寸不支持
+- 质量参数不支持
+- 当前服务商不支持图生图或 Mask
+- 账户额度不足
+
+可以先尝试：
+
+```text
+模型：gpt-image-1
+尺寸：1024x1024
+质量：auto
+格式：png
+背景：auto
+```
+
+### 历史看不到
+
+先按 `Ctrl + F5` 强制刷新。
+
+如果仍然没有：
+
+- 确认当前浏览器没有禁用 IndexedDB
+- 确认不是无痕模式
+- 旧版本生成的临时远程图片链接可能已经过期
+
+新版历史会显示为卡片，即使图片预览失效，也会显示提示词和尺寸信息。
+
+## 部署说明
+
+不建议直接用 GitHub Pages 部署完整版本。
+
+原因：GitHub Pages 只能托管静态文件，不能运行 `server.js`，所以 `/api/images` 和 `/api/test` 无法工作。
+
+推荐部署到支持 Node.js 的平台：
+
+- Render
+- Railway
+- Fly.io
+- Vercel
+- 自己的 VPS
+
+启动命令：
+
+```bash
+npm start
+```
+
+环境变量示例：
+
+```text
+HOST=0.0.0.0
+PORT=4173
+```
 
 ## 项目结构
 
@@ -41,214 +262,19 @@ image2-studio/
 ├─ server.js
 ├─ package.json
 ├─ README.md
+├─ start-image2.vbs
+├─ 启动生图网站.vbs
 └─ 启动生图网站.cmd
-```
-
-## 本地启动
-
-需要 Node.js 20 或更高版本。
-
-### Windows 双击启动
-
-直接双击：
-
-```text
-启动生图网站.cmd
-```
-
-然后打开：
-
-```text
-http://localhost:4173
-```
-
-### 命令行启动
-
-```bash
-npm start
-```
-
-默认地址：
-
-```text
-http://localhost:4173
-```
-
-## 接口配置
-
-打开网站后，点击右上角钥匙按钮，填写：
-
-```text
-服务名称：OpenAI / 第三方接口名称
-API Base URL：https://api.openai.com/v1
-API Key：你的 API Key
-Organization：可选
-Project：可选
-```
-
-如果使用第三方兼容接口，把 `API Base URL` 改成服务商提供的地址，例如：
-
-```text
-https://example.com/v1
-```
-
-程序会自动请求：
-
-```text
-https://example.com/v1/images/generations
-https://example.com/v1/images/edits
 ```
 
 ## 安全说明
 
-- API Key 保存在当前浏览器的 `localStorage` 或 `sessionStorage` 中。
-- API Key 不会写入服务端文件。
-- 默认服务只监听 `127.0.0.1`，适合自己电脑本地使用。
-- 如果部署到公网，请不要内置自己的 API Key。
-- 建议让每个使用者填写自己的 Key。
-
-## 费用提示
-
-页面里的费用提示是“相对消耗估算”，不是最终账单价格。
-
-影响费用的因素通常包括：
-
-- 模型
-- 图片尺寸
-- 图片质量
-- 生成数量
-- 服务商计费规则
-
-最终费用以 OpenAI 或第三方服务商账单为准。
-
-## 部署说明
-
-### GitHub Pages
-
-不建议直接用 GitHub Pages 部署完整版本。
-
-原因：本项目需要 `server.js` 作为后端代理请求图像接口，而 GitHub Pages 只能托管静态文件，不能运行 Node.js 后端。
-
-如果强行只部署 `public/`，页面可以打开，但 `/api/images` 和 `/api/test` 无法工作。
-
-### 推荐部署方式
-
-推荐使用支持 Node.js 的平台：
-
-- Render
-- Railway
-- Fly.io
-- Vercel
-- 自己的 VPS
-
-部署时启动命令：
-
-```bash
-npm start
-```
-
-默认端口：
-
-```text
-4173
-```
-
-如果平台要求读取环境变量端口，可以设置：
-
-```bash
-PORT=4173
-```
-
-如果需要公网访问，可以设置：
-
-```bash
-HOST=0.0.0.0
-```
-
-## Render 部署示例
-
-1. 把项目推送到 GitHub。
-2. 打开 Render。
-3. New Web Service。
-4. 选择 `lczlichunzhe/image2-studio` 仓库。
-5. Build Command 留空或填：
-
-```bash
-npm install
-```
-
-6. Start Command 填：
-
-```bash
-npm start
-```
-
-7. 环境变量可选：
-
-```text
-HOST=0.0.0.0
-PORT=10000
-```
-
-注意：有些平台会自动注入 `PORT`，通常不需要手动设置。
-
-## 常见问题
-
-### 1. 页面打不开
-
-确认服务是否已启动：
-
-```bash
-npm start
-```
-
-然后访问：
-
-```text
-http://localhost:4173/api/health
-```
-
-如果返回：
-
-```json
-{ "ok": true }
-```
-
-说明服务正常。
-
-### 2. 提示未绑定 API Key
-
-点击右上角钥匙按钮，填写 API Key 并保存。
-
-### 3. 接口测试失败
-
-检查：
-
-- API Base URL 是否正确
-- API Key 是否正确
-- Key 是否有图像接口权限
-- 服务商是否兼容 OpenAI Images API
-- 本地网络是否能访问对应服务商
-
-### 4. 生成失败，但接口测试正常
-
-可能原因：
-
-- 模型名不支持
-- 尺寸不支持
-- 质量参数不支持
-- 服务商不支持图生图或 Mask 编辑
-- 账号额度不足
-
-可以尝试：
-
-- 使用 `gpt-image-1`
-- 尺寸选择 `1024x1024`
-- 质量选择 `auto`
-- 输出格式选择 `png`
-- 关闭透明背景
+- API Key 保存在当前浏览器本地
+- API Key 不会写入仓库文件
+- 默认只监听本机地址，适合自己电脑使用
+- 如果部署到公网，不要把自己的 API Key 写死在代码里
+- 建议每个使用者填写自己的 Key
 
 ## License
 
-Private / Personal use by default.  
-如果要公开开源，可以自行补充许可证，例如 MIT。
+Private / Personal use by default.
