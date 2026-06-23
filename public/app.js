@@ -50,6 +50,7 @@ const els = {
   generate: $("#generate"),
   resetForm: $("#resetForm"),
   referenceImages: $("#referenceImages"),
+  referenceFolder: $("#referenceFolder"),
   maskImage: $("#maskImage"),
   refPreview: $("#refPreview"),
   maskPreview: $("#maskPreview"),
@@ -119,9 +120,10 @@ const promptTemplates = {
 };
 
 const qualityMultiplier = { low: 0.35, medium: 1, high: 2.6, auto: 1 };
-const providerTierPrices = { "1K": 0.6, "2K": 0.8, "4K": 1 };
+const providerTierPrices = { "1K": 0.06, "2K": 0.08, "4K": 0.1 };
 const historyDbName = "image2-studio";
 const historyDbStore = "history";
+const maxReferenceImages = 24;
 
 const promptOptimizeText = {
   balanced: "画面主体清晰，构图平衡，光线自然，细节丰富，材质可信，整体完成度高",
@@ -151,7 +153,11 @@ function normalizeHistory(items) {
       size: item.size || "unknown",
       quality: item.quality || "auto",
       format: item.format || inferFormat(item.dataUrl || item.url),
-      createdAt: item.createdAt || new Date().toISOString()
+      createdAt: item.createdAt || new Date().toISOString(),
+      durationMs: Number(item.durationMs) || 0,
+      apiSize: item.apiSize || "",
+      requestedSize: item.requestedSize || "",
+      fallbackSize: item.fallbackSize || ""
     }))
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
@@ -357,7 +363,7 @@ function getApiSize() {
   if (size === "auto") return size;
   const parsed = parseSize(size);
   if (!parsed) return size;
-  return `${ceil16(parsed.width)}x${ceil16(parsed.height)}`;
+  return normalizeRequestSize(parsed);
 }
 
 function getSize() {
@@ -413,6 +419,23 @@ function getProviderBillingTier(size) {
   return "4K";
 }
 
+function normalizeRequestSize(parsed) {
+  const width = ceil16(parsed.width);
+  const height = ceil16(parsed.height);
+  const longEdge = Math.max(width, height);
+  const shortEdge = Math.min(width, height);
+  if (longEdge >= 3072) {
+    return width >= height ? "3840x2160" : "2160x3840";
+  }
+  if (longEdge > 2048) {
+    return width >= height ? "2048x1152" : "1152x2048";
+  }
+  if (longEdge > 1536 || shortEdge > 1536) {
+    return width === height ? "2048x2048" : (width >= height ? "2048x1152" : "1152x2048");
+  }
+  return `${width}x${height}`;
+}
+
 function updateCostEstimate() {
   const model = getModel() || "自定义模型";
   const size = getSize();
@@ -435,6 +458,16 @@ function updateCostEstimate() {
   els.costEstimate.textContent = `费用预估：${label} · ${quality} · ${count} 张，${apiHint}${providerHint} 像素/质量相对量约 ${relative.toFixed(2)}x。${officialHint}`;
   const engineTier = $("#engineTier");
   if (engineTier) engineTier.textContent = billingTier === "auto" ? "自动判定" : `${billingTier} · ${apiSize}`;
+}
+
+function formatDuration(ms) {
+  const value = Math.max(0, Number(ms) || 0);
+  if (value < 1000) return `${value}ms`;
+  const seconds = value / 1000;
+  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.round(seconds % 60);
+  return `${minutes}m ${rest}s`;
 }
 
 function clamp(value, min, max) {
@@ -526,6 +559,8 @@ async function generateImages() {
     return;
   }
 
+  const startedAt = performance.now();
+  const requestedAt = new Date().toISOString();
   setBusy(true);
   flashStatus(`正在请求 ${state.settings.providerName || "图像接口"}...`);
   try {
@@ -546,11 +581,20 @@ async function generateImages() {
     }
     const images = (data.data || []).filter((item) => item.dataUrl || item.url);
     if (!images.length) throw new Error("接口没有返回图片。");
-    const processedImages = await resizeImagesToTarget(images);
+    const durationMs = Math.round(performance.now() - startedAt);
+    const apiSize = data.apiSize || data.fallbackSize || getApiSize();
+    const processedImages = (await resizeImagesToTarget(images, apiSize)).map((image) => ({
+      ...image,
+      createdAt: requestedAt,
+      durationMs,
+      apiSize: image.apiSize || apiSize,
+      requestedSize: image.requestedSize || data.requestedSize || getApiSize(),
+      fallbackSize: image.fallbackSize || data.fallbackSize || ""
+    }));
     renderResults(processedImages);
-    const historySaved = await addHistory(processedImages);
+    const historySaved = await addHistory(processedImages, { createdAt: requestedAt, durationMs });
     const historyNote = historySaved ? "" : " 图片已生成，但浏览器历史空间不足，未保存到历史。";
-    flashStatus(`完成：${images.length} 张图片。${els.costEstimate.textContent.replace("费用预估：", "")}${historyNote}`, !historySaved);
+    flashStatus(`完成：${images.length} 张图片，用时 ${formatDuration(durationMs)}。${els.costEstimate.textContent.replace("费用预估：", "")}${historyNote}`, !historySaved);
   } catch (error) {
     flashStatus(readableLocalFetchError(error), true);
   } finally {
@@ -579,10 +623,9 @@ function renderResults(images) {
   }
 }
 
-async function resizeImagesToTarget(images) {
+async function resizeImagesToTarget(images, apiSize = getApiSize()) {
   const targetSize = getTargetSize();
-  const apiSize = getApiSize();
-  if (targetSize === "auto" || targetSize === apiSize) return images;
+  if (targetSize === "auto") return images;
   const target = parseSize(targetSize);
   if (!target) return images;
   return Promise.all(images.map((image) => resizeImageToTarget(image, target, apiSize)));
@@ -618,8 +661,8 @@ async function resizeImageToTarget(image, target, apiSize) {
   }
 }
 
-async function addHistory(images) {
-  const now = new Date().toISOString();
+async function addHistory(images, meta = {}) {
+  const now = meta.createdAt || new Date().toISOString();
   const prompt = els.prompt.value.trim();
   const model = getModel();
   const size = getSize();
@@ -631,9 +674,13 @@ async function addHistory(images) {
     prompt,
     model,
     size,
+    requestedSize: image.requestedSize || getApiSize(),
+    fallbackSize: image.fallbackSize || "",
     quality,
     format,
-    createdAt: now
+    createdAt: now,
+    durationMs: image.durationMs || meta.durationMs || 0,
+    apiSize: image.apiSize || getApiSize()
   }));
   state.history = normalizeHistory([...entries, ...state.history]);
   const saved = await persistHistory(entries);
@@ -663,7 +710,7 @@ function createImageCard(image, kind) {
 
   const src = image.dataUrl || image.url;
   const prompt = image.prompt || els.prompt.value.trim();
-  const meta = [image.model, image.size, image.quality].filter(Boolean).join(" · ");
+  const meta = imageMetaLine(image);
   const format = image.format || inferFormat(src);
   img.src = src;
   text.textContent = kind === "result"
@@ -732,7 +779,7 @@ function createHistoryThumb(item) {
   title.textContent = shortText(item.prompt || "历史图片", 34);
 
   const meta = document.createElement("span");
-  meta.textContent = [item.size, item.model, formatHistoryTime(item.createdAt)].filter(Boolean).join(" · ");
+  meta.textContent = imageMetaLine(item);
 
   info.append(title, meta);
   button.append(img, info);
@@ -759,6 +806,18 @@ function formatHistoryTime(value) {
   const hour = String(date.getHours()).padStart(2, "0");
   const minute = String(date.getMinutes()).padStart(2, "0");
   return `${month}-${day} ${hour}:${minute}`;
+}
+
+function imageMetaLine(image) {
+  return [
+    image.size,
+    image.apiSize && image.apiSize !== image.size ? `接口 ${image.apiSize}` : "",
+    image.fallbackSize ? "已自动降档" : "",
+    image.model,
+    image.quality,
+    image.durationMs ? `耗时 ${formatDuration(image.durationMs)}` : "",
+    image.createdAt ? formatHistoryTime(image.createdAt) : ""
+  ].filter(Boolean).join(" · ");
 }
 
 function openImageViewer(image) {
@@ -840,13 +899,14 @@ function renderHistory() {
   const filter = els.historyFilter?.value || "all";
   const today = new Date().toISOString().slice(0, 10);
   const filtered = state.history.filter((item) => {
-    const haystack = [item.prompt, item.size, item.model, item.quality].filter(Boolean).join(" ").toLowerCase();
+    const haystack = [item.prompt, item.size, item.apiSize, item.model, item.quality].filter(Boolean).join(" ").toLowerCase();
     const size = String(item.size || "").toLowerCase();
     const matchesQuery = !query || haystack.includes(query);
     const matchesFilter =
       filter === "all" ||
       (filter === "1k" && (/1024|1536|1k/.test(size))) ||
       (filter === "2k" && (/2048|2k/.test(size))) ||
+      (filter === "4k" && (/3840|2160|4k/.test(size))) ||
       (filter === "today" && String(item.createdAt || "").startsWith(today));
     return matchesQuery && matchesFilter;
   });
@@ -872,15 +932,22 @@ function flashStatus(message, isError = false) {
 function renderFilePreview(container, files) {
   container.innerHTML = "";
   for (const file of files) {
+    const wrap = document.createElement("div");
+    wrap.className = "ref-thumb";
     const img = document.createElement("img");
     img.src = file.dataUrl;
     img.alt = file.name || "reference";
-    container.appendChild(img);
+    const label = document.createElement("span");
+    label.textContent = shortText(file.name || "reference", 18);
+    wrap.append(img, label);
+    container.appendChild(wrap);
   }
 }
 
-async function readFiles(fileList, limit = 6) {
-  const files = Array.from(fileList || []).slice(0, limit);
+async function readFiles(fileList, limit = maxReferenceImages) {
+  const files = Array.from(fileList || [])
+    .filter((file) => /^image\/(png|jpe?g|webp)$/i.test(file.type))
+    .slice(0, limit);
   return Promise.all(files.map(readFile));
 }
 
@@ -891,6 +958,30 @@ function readFile(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+async function appendReferenceFiles(fileList, sourceLabel = "图片") {
+  const remaining = Math.max(0, maxReferenceImages - state.references.length);
+  if (!remaining) {
+    flashStatus(`最多保留 ${maxReferenceImages} 张参考图，请先清空一部分。`, true);
+    return;
+  }
+  const incoming = await readFiles(fileList, remaining);
+  if (!incoming.length) {
+    flashStatus("没有找到可用图片。", true);
+    return;
+  }
+  const known = new Set(state.references.map((file) => `${file.name}-${file.dataUrl.length}`));
+  const unique = incoming.filter((file) => {
+    const key = `${file.name}-${file.dataUrl.length}`;
+    if (known.has(key)) return false;
+    known.add(key);
+    return true;
+  });
+  state.references = [...state.references, ...unique].slice(0, maxReferenceImages);
+  renderFilePreview(els.refPreview, state.references);
+  setMode("edit");
+  flashStatus(`已追加 ${unique.length} 张${sourceLabel}，当前 ${state.references.length} 张参考图。`);
 }
 
 function resetForm() {
@@ -911,6 +1002,9 @@ function resetForm() {
   els.inputFidelity.value = "auto";
   state.references = [];
   state.mask = null;
+  els.referenceImages.value = "";
+  if (els.referenceFolder) els.referenceFolder.value = "";
+  els.maskImage.value = "";
   renderFilePreview(els.refPreview, []);
   renderFilePreview(els.maskPreview, []);
   toggleCustomSize();
@@ -960,7 +1054,7 @@ function bindEvents() {
     button.addEventListener("click", () => setMode(button.dataset.modeTarget));
   });
   $$(".rail-button[data-scroll-target='history']").forEach((button) => {
-    button.addEventListener("click", () => $(".history-block")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    button.addEventListener("click", () => $(".inspector-history-card")?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
   });
   els.size.addEventListener("change", () => {
     if (els.size.value !== tierToSize[els.resolutionTier.value]) {
@@ -1000,6 +1094,7 @@ function bindEvents() {
   els.clearRefs.addEventListener("click", () => {
     state.references = [];
     els.referenceImages.value = "";
+    if (els.referenceFolder) els.referenceFolder.value = "";
     renderFilePreview(els.refPreview, []);
   });
   els.clearMask.addEventListener("click", () => {
@@ -1029,9 +1124,31 @@ function bindEvents() {
     flashStatus("高清模式会按目标尺寸请求，费用以服务商账单为准。");
   });
   els.referenceImages.addEventListener("change", async (event) => {
-    state.references = await readFiles(event.target.files, 6);
-    renderFilePreview(els.refPreview, state.references);
+    await appendReferenceFiles(event.target.files, "图片");
+    els.referenceImages.value = "";
   });
+  els.referenceFolder?.addEventListener("change", async (event) => {
+    await appendReferenceFiles(event.target.files, "文件夹图片");
+    els.referenceFolder.value = "";
+  });
+  const dropRefs = $("#dropRefs");
+  if (dropRefs) {
+    ["dragenter", "dragover"].forEach((type) => {
+      dropRefs.addEventListener(type, (event) => {
+        event.preventDefault();
+        dropRefs.classList.add("drag-over");
+      });
+    });
+    ["dragleave", "drop"].forEach((type) => {
+      dropRefs.addEventListener(type, (event) => {
+        event.preventDefault();
+        dropRefs.classList.remove("drag-over");
+      });
+    });
+    dropRefs.addEventListener("drop", async (event) => {
+      await appendReferenceFiles(event.dataTransfer?.files, "拖入图片");
+    });
+  }
   els.maskImage.addEventListener("change", async (event) => {
     const [mask] = await readFiles(event.target.files, 1);
     state.mask = mask || null;

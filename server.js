@@ -221,84 +221,125 @@ function dataUrlToBlob(file) {
   };
 }
 
+function fallbackImageSize(size) {
+  const value = String(size || "");
+  if (value === "3840x2160") return "2048x1152";
+  if (value === "2160x3840") return "1152x2048";
+  if (value === "2048x2048") return "1024x1024";
+  return "";
+}
+
+function isSizeProviderError(status, data) {
+  if (![400, 422].includes(Number(status))) return false;
+  const message = JSON.stringify(data?.error || data || "").toLowerCase();
+  return /size|dimension|resolution|unsupported|invalid|尺寸|分辨率|不支持/.test(message);
+}
+
+async function readProviderJson(response) {
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { error: { message: readableProviderError(text) } };
+  }
+}
+
 async function callOpenAI(req, payload) {
   const headers = authHeaders(req);
   const hasEditInputs = Array.isArray(payload.images) && payload.images.length > 0;
   const endpoint = imageEndpoint(req, hasEditInputs ? "edits" : "generations");
+  const label = hasEditInputs ? "图生图请求" : "文生图请求";
 
-  let response;
-  if (hasEditInputs) {
-    const form = new FormData();
-    const fields = cleanObject({
-      model: payload.model,
-      prompt: payload.prompt,
-      n: payload.n,
-      size: payload.size,
-      quality: payload.quality,
-      background: payload.background,
-      output_format: payload.output_format,
-      output_compression: payload.output_compression,
-      input_fidelity: payload.input_fidelity,
-      moderation: payload.moderation
-    });
-    for (const [key, value] of Object.entries(fields)) {
-      form.append(key, String(value));
+  async function sendImageRequest(requestPayload) {
+    if (hasEditInputs) {
+      const form = new FormData();
+      const fields = cleanObject({
+        model: requestPayload.model,
+        prompt: requestPayload.prompt,
+        n: requestPayload.n,
+        size: requestPayload.size,
+        quality: requestPayload.quality,
+        background: requestPayload.background,
+        output_format: requestPayload.output_format,
+        output_compression: requestPayload.output_compression,
+        input_fidelity: requestPayload.input_fidelity,
+        moderation: requestPayload.moderation
+      });
+      for (const [key, value] of Object.entries(fields)) {
+        form.append(key, String(value));
+      }
+      for (const image of requestPayload.images) {
+        const { blob, name } = dataUrlToBlob(image);
+        form.append("image[]", blob, name);
+      }
+      if (requestPayload.mask?.dataUrl) {
+        const { blob, name } = dataUrlToBlob(requestPayload.mask);
+        form.append("mask", blob, name);
+      }
+      return fetchProvider(endpoint, {
+        method: "POST",
+        headers,
+        body: form
+      }, label);
     }
-    for (const image of payload.images) {
-      const { blob, name } = dataUrlToBlob(image);
-      form.append("image[]", blob, name);
-    }
-    if (payload.mask?.dataUrl) {
-      const { blob, name } = dataUrlToBlob(payload.mask);
-      form.append("mask", blob, name);
-    }
-    response = await fetchProvider(endpoint, {
-      method: "POST",
-      headers,
-      body: form
-    }, "图生图请求");
-  } else {
+
     const body = cleanObject({
-      model: payload.model,
-      prompt: payload.prompt,
-      n: payload.n,
-      size: payload.size,
-      quality: payload.quality,
-      background: payload.background,
-      output_format: payload.output_format,
-      output_compression: payload.output_compression,
-      moderation: payload.moderation
+      model: requestPayload.model,
+      prompt: requestPayload.prompt,
+      n: requestPayload.n,
+      size: requestPayload.size,
+      quality: requestPayload.quality,
+      background: requestPayload.background,
+      output_format: requestPayload.output_format,
+      output_compression: requestPayload.output_compression,
+      moderation: requestPayload.moderation
     });
-    response = await fetchProvider(endpoint, {
+    return fetchProvider(endpoint, {
       method: "POST",
       headers: {
         ...headers,
         "content-type": "application/json"
       },
       body: JSON.stringify(body)
-    }, "文生图请求");
+    }, label);
   }
 
-  const text = await response.text();
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    data = { error: { message: readableProviderError(text) } };
+  let requestPayload = payload;
+  let fallbackSize = "";
+  let response = await sendImageRequest(requestPayload);
+  let data = await readProviderJson(response);
+
+  const nextSize = fallbackImageSize(payload.size);
+  if (!response.ok && nextSize && isSizeProviderError(response.status, data)) {
+    fallbackSize = nextSize;
+    requestPayload = { ...payload, size: nextSize };
+    response = await sendImageRequest(requestPayload);
+    data = await readProviderJson(response);
   }
 
   if (!response.ok) {
     const message = data?.error?.message || `OpenAI API 请求失败：${response.status}`;
     const error = new Error(message);
     error.status = response.status;
-    error.details = data;
+    error.details = {
+      ...data,
+      requestedSize: payload.size || "",
+      apiSize: requestPayload.size || payload.size || "",
+      fallbackSize
+    };
     throw error;
   }
 
   const format = payload.output_format || "png";
+  data.requestedSize = payload.size || "";
+  data.apiSize = requestPayload.size || payload.size || "";
+  data.fallbackSize = fallbackSize;
   if (Array.isArray(data.data)) {
     data.data = data.data.map((item) => ({
       ...item,
+      apiSize: data.apiSize,
+      requestedSize: data.requestedSize,
+      fallbackSize: data.fallbackSize,
       dataUrl: item.b64_json ? `data:image/${format};base64,${item.b64_json}` : item.url
     }));
   }

@@ -125,7 +125,11 @@
             <label class="dropzone" id="dropRefs">
               <input id="referenceImages" type="file" accept="image/png,image/jpeg,image/webp" multiple />
               <svg><use href="#icon-upload"></use></svg>
-              <span>上传图片</span>
+              <span>拖入图片 / 点击上传</span>
+            </label>
+            <label class="folder-upload">
+              <input id="referenceFolder" type="file" accept="image/png,image/jpeg,image/webp" multiple webkitdirectory directory />
+              <span>选择文件夹追加图片</span>
             </label>
             <div class="thumb-strip" id="refPreview"></div>
 
@@ -364,14 +368,22 @@
               <div class="engine-row"><b>费用档</b><span id="engineTier">1K / 2K / 4K</span></div>
               <div class="engine-row"><b>模式</b><span id="engineMode">省钱模式</span></div>
             </div>
-            <div class="inspector-card">
+            <div class="inspector-card inspector-history-card">
               <div class="section-title">
-                <span>批量队列</span>
-                <span>3 条</span>
+                <span>历史轨道</span>
+                <span id="historyCount">0 条</span>
               </div>
-              <div class="queue-item"><b>小红书封面</b><span>等待生成</span></div>
-              <div class="queue-item"><b>产品主图</b><span>可加入队列</span></div>
-              <div class="queue-item"><b>头像版本</b><span>可加入队列</span></div>
+              <div class="history-tools side-history-tools">
+                <input id="historySearch" type="search" placeholder="搜索提示词 / 尺寸 / 模型" />
+                <select id="historyFilter">
+                  <option value="all">全部</option>
+                  <option value="1k">1K</option>
+                  <option value="2k">2K</option>
+                  <option value="4k">4K</option>
+                  <option value="today">今天</option>
+                </select>
+              </div>
+              <div class="history-grid side-history-grid" id="history"></div>
             </div>
             <div class="inspector-card diagnosis-card">
               <div class="section-title">
@@ -382,24 +394,7 @@
             </div>
         </aside>
 
-        <div class="history-block">
-            <div class="stage-toolbar small">
-              <div>
-                <h2>历史轨道</h2>
-                <p id="historyCount">0 条记录</p>
-              </div>
-              <div class="history-tools">
-                <input id="historySearch" type="search" placeholder="搜索提示词 / 尺寸 / 模型" />
-                <select id="historyFilter">
-                  <option value="all">全部</option>
-                  <option value="1k">1K</option>
-                  <option value="2k">2K</option>
-                  <option value="today">今天</option>
-                </select>
-              </div>
-            </div>
-            <div class="history-grid" id="history"></div>
-        </div>
+        <div class="history-block" aria-hidden="true"></div>
       </main>
     </div>
 
