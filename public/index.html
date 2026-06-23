@@ -166,63 +166,26 @@
                 <input id="count" type="number" min="1" value="1" />
               </label>
               <label>
-                尺寸
+                画幅比例
                 <select id="size">
-                  <option value="auto">auto</option>
-                  <option value="1024x1024" selected>1024 x 1024</option>
-                  <option value="1536x1024">1536 x 1024</option>
-                  <option value="1024x1536">1024 x 1536</option>
-                  <option value="2048x2048">2048 x 2048</option>
-                  <option value="2048x1152">2048 x 1152</option>
-                  <option value="3840x2160">3840 x 2160</option>
-                  <option value="2160x3840">2160 x 3840</option>
-                  <option value="400x400">小红书头像 400 x 400</option>
-                  <option value="1000x800">小红书个人背景图 1000 x 800</option>
-                  <option value="1242x1660">小红书图文封面 竖版 1242 x 1660</option>
-                  <option value="1080x1080">小红书图文封面 方版 1080 x 1080</option>
-                  <option value="2560x1440">小红书图文封面 横版 2560 x 1440</option>
-                  <option value="1080x1440">小红书视频封面 竖版 1080 x 1440</option>
-                  <option value="1440x1080">小红书视频封面 横版 1440 x 1080</option>
-                  <option value="custom">自定义</option>
+                  <option value="9:16" selected>9:16 竖版</option>
+                  <option value="3:4">3:4 竖版</option>
+                  <option value="4:5">4:5 社媒竖版</option>
+                  <option value="2:3">2:3 海报竖版</option>
+                  <option value="1:1">1:1 方图</option>
+                  <option value="4:3">4:3 横版</option>
+                  <option value="3:2">3:2 横版</option>
+                  <option value="16:9">16:9 横版</option>
+                  <option value="21:9">21:9 超宽</option>
+                  <option value="custom">自定义比例</option>
                 </select>
               </label>
               <label>
-                尺寸分组
-                <select id="sizeGroup">
-                  <option value="regular">常规尺寸</option>
-                  <option value="xhs">小红书尺寸</option>
-                  <option value="ecommerce">电商尺寸</option>
-                  <option value="social">社媒尺寸</option>
-                  <option value="wallpaper">壁纸尺寸</option>
-                  <option value="favorite">收藏尺寸</option>
-                </select>
-              </label>
-              <label>
-                尺寸预设
+                清晰度
                 <select id="resolutionTier">
-                  <option value="auto">自动匹配尺寸</option>
-                  <option value="1k-square" selected>1K 方图 1024x1024</option>
-                  <option value="1k-wide">1K 横图 1536x1024</option>
-                  <option value="1k-tall">1K 竖图 1024x1536</option>
-                  <option value="2k-square">2K 方图 2048x2048</option>
-                  <option value="2k-wide">2K 横图 2048x1152</option>
-                  <option value="4k-wide">4K 横图 3840x2160</option>
-                  <option value="4k-tall">4K 竖图 2160x3840</option>
-                  <option value="xhs-avatar">小红书头像 400x400</option>
-                  <option value="xhs-profile-bg">小红书个人背景图 1000x800</option>
-                  <option value="xhs-post-tall">小红书图文封面 竖版 1242x1660</option>
-                  <option value="xhs-post-square">小红书图文封面 方版 1080x1080</option>
-                  <option value="xhs-post-wide">小红书图文封面 横版 2560x1440</option>
-                  <option value="xhs-video-tall">小红书视频封面 竖版 1080x1440</option>
-                  <option value="xhs-video-wide">小红书视频封面 横版 1440x1080</option>
-                  <option value="ecom-square">电商商品主图 1080x1080</option>
-                  <option value="ecom-detail">电商详情横图 1920x1080</option>
-                  <option value="ecom-poster">电商海报 1080x1920</option>
-                  <option value="social-wechat">公众号头图 900x383</option>
-                  <option value="social-bilibili">B站封面 1146x717</option>
-                  <option value="social-douyin">抖音封面 1080x1920</option>
-                  <option value="wallpaper-phone">手机壁纸 1080x2400</option>
-                  <option value="wallpaper-desktop">电脑壁纸 2560x1440</option>
+                  <option value="1k" selected>1K 快速</option>
+                  <option value="2k">2K 清晰</option>
+                  <option value="4k">4K 高清</option>
                 </select>
               </label>
               <label>
@@ -245,12 +208,12 @@
                 </select>
               </label>
               <label class="custom-size hidden">
-                宽
-                <input id="width" type="number" min="256" max="3840" step="16" value="1024" />
+                比例宽
+                <input id="width" type="number" min="1" max="32" step="1" value="9" />
               </label>
               <label class="custom-size hidden">
-                高
-                <input id="height" type="number" min="256" max="3840" step="16" value="1024" />
+                比例高
+                <input id="height" type="number" min="1" max="32" step="1" value="16" />
               </label>
               <label>
                 背景
@@ -288,7 +251,7 @@
                 </select>
               </label>
             </div>
-            <div class="cost-box" id="costEstimate">费用预估：选择模型、尺寸和质量后显示。</div>
+            <div class="cost-box" id="costEstimate">尺寸说明：默认 9:16 竖版 · 1K。</div>
           </section>
 
           <section class="panel-section">
@@ -309,7 +272,7 @@
           <section class="panel-section">
             <div class="section-title">
               <span>生成策略</span>
-              <span>费用确认</span>
+              <span>输出控制</span>
             </div>
             <div class="strategy-toggle">
               <button type="button" class="active" id="economyMode">省钱模式</button>
@@ -365,7 +328,7 @@
               <div class="engine-meter">
                 <span>生成能量</span>
               </div>
-              <div class="engine-row"><b>费用档</b><span id="engineTier">1K / 2K / 4K</span></div>
+              <div class="engine-row"><b>输出规格</b><span id="engineTier">9:16 · 1K</span></div>
               <div class="engine-row"><b>模式</b><span id="engineMode">省钱模式</span></div>
             </div>
             <div class="inspector-card inspector-history-card">
