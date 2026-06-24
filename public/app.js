@@ -36,6 +36,7 @@ const els = {
   customModel: $("#customModel"),
   count: $("#count"),
   size: $("#size"),
+  sizeGroup: $("#sizeGroup"),
   resolutionTier: $("#resolutionTier"),
   quality: $("#quality"),
   promptOptimize: $("#promptOptimize"),
@@ -75,28 +76,38 @@ const presets = {
   isometric: "等距视角图标，清晰轮廓，柔和阴影，模块化结构，现代应用图形"
 };
 
-const aspectRatioLabels = {
-  "9:16": "9:16 竖版",
-  "3:4": "3:4 竖版",
-  "4:5": "4:5 社媒竖版",
-  "2:3": "2:3 海报竖版",
-  "1:1": "1:1 方图",
-  "4:3": "4:3 横版",
-  "3:2": "3:2 横版",
-  "16:9": "16:9 横版",
-  "21:9": "21:9 超宽"
+const tierToSize = {
+  "1k-square": "1024x1024",
+  "1k-wide": "1536x1024",
+  "1k-tall": "1024x1536",
+  "2k-square": "2048x2048",
+  "2k-wide": "2048x1152",
+  "4k-wide": "3840x2160",
+  "4k-tall": "2160x3840",
+  "xhs-avatar": "400x400",
+  "xhs-profile-bg": "1000x800",
+  "xhs-post-tall": "1242x1660",
+  "xhs-post-square": "1080x1080",
+  "xhs-post-wide": "2560x1440",
+  "xhs-video-tall": "1080x1440",
+  "xhs-video-wide": "1440x1080",
+  "ecom-square": "1080x1080",
+  "ecom-detail": "1920x1080",
+  "ecom-poster": "1080x1920",
+  "social-wechat": "900x383",
+  "social-bilibili": "1146x717",
+  "social-douyin": "1080x1920",
+  "wallpaper-phone": "1080x2400",
+  "wallpaper-desktop": "2560x1440"
 };
 
-const clarityLabels = {
-  "1k": "1K 快速",
-  "2k": "2K 清晰",
-  "4k": "4K 高清"
-};
-
-const clarityLongEdges = {
-  "1k": 1536,
-  "2k": 2048,
-  "4k": 3840
+const sizeGroups = {
+  regular: ["auto", "1k-square", "1k-wide", "1k-tall", "2k-square", "2k-wide", "4k-wide", "4k-tall"],
+  xhs: ["auto", "xhs-avatar", "xhs-profile-bg", "xhs-post-tall", "xhs-post-square", "xhs-post-wide", "xhs-video-tall", "xhs-video-wide"],
+  ecommerce: ["auto", "1k-square", "ecom-square", "ecom-detail", "ecom-poster"],
+  social: ["auto", "social-wechat", "social-bilibili", "social-douyin", "xhs-post-square", "xhs-video-wide"],
+  wallpaper: ["auto", "wallpaper-phone", "wallpaper-desktop", "4k-wide", "4k-tall"],
+  favorite: ["auto", "1k-square", "xhs-avatar", "xhs-post-tall", "ecom-square", "wallpaper-desktop"]
 };
 
 const promptTemplates = {
@@ -138,8 +149,6 @@ function normalizeHistory(items) {
       prompt: item.prompt || "",
       model: item.model || "unknown",
       size: item.size || "unknown",
-      aspectRatio: item.aspectRatio || "",
-      clarity: item.clarity || "",
       quality: item.quality || "auto",
       format: item.format || inferFormat(item.dataUrl || item.url),
       createdAt: item.createdAt || new Date().toISOString(),
@@ -354,46 +363,22 @@ function setBusy(isBusy) {
 }
 
 function getTargetSize() {
-  const target = computeTargetSize();
-  return `${target.width}x${target.height}`;
+  if (els.size.value !== "custom") return els.size.value;
+  const width = clamp(Number(els.width.value), 256, 3840);
+  const height = clamp(Number(els.height.value), 256, 3840);
+  return `${Math.round(width)}x${Math.round(height)}`;
 }
 
 function getApiSize() {
   const size = getTargetSize();
+  if (size === "auto") return size;
   const parsed = parseSize(size);
   if (!parsed) return size;
-  return normalizeRequestSize(parsed, getClarity());
+  return normalizeRequestSize(parsed);
 }
 
 function getSize() {
   return getTargetSize();
-}
-
-function getClarity() {
-  return ["1k", "2k", "4k"].includes(els.resolutionTier.value) ? els.resolutionTier.value : "1k";
-}
-
-function getAspectRatioParts() {
-  if (els.size.value === "custom") {
-    return {
-      width: clamp(Math.round(Number(els.width.value)), 1, 32),
-      height: clamp(Math.round(Number(els.height.value)), 1, 32),
-      label: `${clamp(Math.round(Number(els.width.value)), 1, 32)}:${clamp(Math.round(Number(els.height.value)), 1, 32)} 自定义`
-    };
-  }
-  const match = String(els.size.value || "9:16").match(/^(\d+):(\d+)$/);
-  if (!match) return { width: 9, height: 16, label: aspectRatioLabels["9:16"] };
-  const key = `${Number(match[1])}:${Number(match[2])}`;
-  return { width: Number(match[1]), height: Number(match[2]), label: aspectRatioLabels[key] || key };
-}
-
-function computeTargetSize(clarity = getClarity(), ratio = getAspectRatioParts()) {
-  const longEdge = clarityLongEdges[clarity] || clarityLongEdges["1k"];
-  const isWide = ratio.width >= ratio.height;
-  const scale = longEdge / Math.max(ratio.width, ratio.height);
-  const width = ceil16(isWide ? longEdge : ratio.width * scale);
-  const height = ceil16(isWide ? ratio.height * scale : longEdge);
-  return { width, height };
 }
 
 function inferFormat(src) {
@@ -409,35 +394,61 @@ function getModel() {
     : els.model.value;
 }
 
-function syncOutputControls() {
+function syncTierToSize() {
+  const size = tierToSize[els.resolutionTier.value];
+  if (!size) return;
+  els.size.value = size;
   toggleCustomSize();
   updateCostEstimate();
 }
 
-function normalizeRequestSize(parsed, clarity = getClarity()) {
+function syncSizeGroup() {
+  const allowed = sizeGroups[els.sizeGroup?.value] || sizeGroups.regular;
+  Array.from(els.resolutionTier.options).forEach((option) => {
+    option.hidden = !allowed.includes(option.value);
+  });
+  if (!allowed.includes(els.resolutionTier.value)) {
+    els.resolutionTier.value = allowed.includes("1k-square") ? "1k-square" : allowed[0];
+    syncTierToSize();
+  }
+}
+
+function normalizeRequestSize(parsed) {
   const width = ceil16(parsed.width);
   const height = ceil16(parsed.height);
   const longEdge = Math.max(width, height);
-  const isWide = width >= height;
-  if (width === height) {
-    return clarity === "4k" ? "2048x2048" : (longEdge > 1536 ? "2048x2048" : "1024x1024");
+  const shortEdge = Math.min(width, height);
+  if (longEdge >= 3072) {
+    return width >= height ? "3840x2160" : "2160x3840";
   }
-  if (clarity === "4k" && longEdge >= 3072) return isWide ? "3840x2160" : "2160x3840";
-  if (clarity !== "1k" || longEdge > 1536) return isWide ? "2048x1152" : "1152x2048";
-  return isWide ? "1536x1024" : "1024x1536";
+  if (longEdge > 2048) {
+    return width >= height ? "2048x1152" : "1152x2048";
+  }
+  if (longEdge > 1536 || shortEdge > 1536) {
+    return width === height ? "2048x2048" : (width >= height ? "2048x1152" : "1152x2048");
+  }
+  return `${width}x${height}`;
+}
+
+function getProviderBillingTier(size) {
+  if (size === "auto") return "auto";
+  const match = String(size).match(/^(\d+)x(\d+)$/);
+  if (!match) return "auto";
+  const longEdge = Math.max(Number(match[1]), Number(match[2]));
+  if (longEdge <= 1024) return "1K";
+  if (longEdge <= 2048) return "2K";
+  return "4K";
 }
 
 function updateCostEstimate() {
-  const ratio = getAspectRatioParts();
-  const clarity = getClarity();
   const size = getSize();
   const apiSize = getApiSize();
   const count = getCount();
-  const clarityLabel = clarityLabels[clarity] || clarity.toUpperCase();
-  const apiHint = apiSize !== size ? `接口先用 ${apiSize}，出图后适配为 ${size}。` : `接口尺寸 ${apiSize}。`;
-  els.costEstimate.textContent = `尺寸说明：${ratio.label} · ${clarityLabel} · ${count} 张，目标输出 ${size}。${apiHint}`;
+  const label = size === "auto" ? "自动尺寸" : size;
+  const apiHint = apiSize !== size ? `接口尺寸 ${apiSize}，生成后完整缩放为 ${size}，不会裁掉上下边缘。` : `接口尺寸 ${apiSize}。`;
+  els.costEstimate.textContent = `尺寸说明：${label} · ${count} 张。${apiHint}`;
   const engineTier = $("#engineTier");
-  if (engineTier) engineTier.textContent = `${ratio.label} · ${clarityLabel} · ${size}`;
+  if (engineTier) engineTier.textContent = `${getProviderBillingTier(apiSize)} · ${label}`;
 }
 
 function formatDuration(ms) {
@@ -624,20 +635,12 @@ async function resizeImageToTarget(image, target, apiSize) {
     const context = canvas.getContext("2d");
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, canvas.width, canvas.height);
-    const sourceRatio = bitmap.width / bitmap.height;
-    const targetRatio = target.width / target.height;
-    let sourceWidth = bitmap.width;
-    let sourceHeight = bitmap.height;
-    let sourceX = 0;
-    let sourceY = 0;
-    if (sourceRatio > targetRatio) {
-      sourceWidth = bitmap.height * targetRatio;
-      sourceX = (bitmap.width - sourceWidth) / 2;
-    } else if (sourceRatio < targetRatio) {
-      sourceHeight = bitmap.width / targetRatio;
-      sourceY = (bitmap.height - sourceHeight) / 2;
-    }
-    context.drawImage(bitmap, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, target.width, target.height);
+    const scale = Math.min(target.width / bitmap.width, target.height / bitmap.height);
+    const drawWidth = Math.round(bitmap.width * scale);
+    const drawHeight = Math.round(bitmap.height * scale);
+    const drawX = Math.round((target.width - drawWidth) / 2);
+    const drawY = Math.round((target.height - drawHeight) / 2);
+    context.drawImage(bitmap, 0, 0, bitmap.width, bitmap.height, drawX, drawY, drawWidth, drawHeight);
     if (typeof bitmap.close === "function") bitmap.close();
     const format = els.format.value || inferFormat(src);
     const mime = format === "jpg" || format === "jpeg" ? "image/jpeg" : `image/${format}`;
@@ -661,8 +664,6 @@ async function addHistory(images, meta = {}) {
   const prompt = els.prompt.value.trim();
   const model = getModel();
   const size = getSize();
-  const ratio = getAspectRatioParts();
-  const clarity = getClarity();
   const quality = els.quality.value;
   const format = els.format.value || inferFormat(images[0]?.dataUrl || images[0]?.url);
   const entries = images.map((image) => ({
@@ -671,8 +672,6 @@ async function addHistory(images, meta = {}) {
     prompt,
     model,
     size,
-    aspectRatio: ratio.label,
-    clarity,
     requestedSize: image.requestedSize || getApiSize(),
     fallbackSize: image.fallbackSize || "",
     quality,
@@ -828,8 +827,6 @@ function formatHistoryTime(value) {
 
 function imageMetaLine(image) {
   return [
-    image.aspectRatio,
-    image.clarity ? (clarityLabels[image.clarity] || image.clarity.toUpperCase()) : "",
     image.size,
     image.apiSize && image.apiSize !== image.size ? `接口 ${image.apiSize}` : "",
     image.fallbackSize ? "已自动降档" : "",
@@ -838,6 +835,12 @@ function imageMetaLine(image) {
     image.durationMs ? `耗时 ${formatDuration(image.durationMs)}` : "",
     image.createdAt ? formatHistoryTime(image.createdAt) : ""
   ].filter(Boolean).join(" · ");
+}
+
+function getHistorySizeTier(item) {
+  const size = parseSize(item.size || item.apiSize || "");
+  if (!size) return "";
+  return getProviderBillingTier(`${size.width}x${size.height}`).toLowerCase();
 }
 
 async function deleteHistoryItem(id) {
@@ -930,14 +933,14 @@ function renderHistory() {
   const filter = els.historyFilter?.value || "all";
   const today = new Date().toISOString().slice(0, 10);
   const filtered = state.history.filter((item) => {
-    const haystack = [item.prompt, item.size, item.apiSize, item.model, item.quality, item.aspectRatio, item.clarity].filter(Boolean).join(" ").toLowerCase();
-    const size = [item.size, item.apiSize, item.clarity].filter(Boolean).join(" ").toLowerCase();
+    const tier = getHistorySizeTier(item);
+    const haystack = [item.prompt, item.size, item.apiSize, item.model, item.quality, tier].filter(Boolean).join(" ").toLowerCase();
     const matchesQuery = !query || haystack.includes(query);
     const matchesFilter =
       filter === "all" ||
-      (filter === "1k" && (/1024|1536|1k/.test(size))) ||
-      (filter === "2k" && (/2048|2k/.test(size))) ||
-      (filter === "4k" && (/3840|2160|4k/.test(size))) ||
+      (filter === "1k" && tier === "1k") ||
+      (filter === "2k" && tier === "2k") ||
+      (filter === "4k" && tier === "4k") ||
       (filter === "today" && String(item.createdAt || "").startsWith(today));
     return matchesQuery && matchesFilter;
   });
@@ -1040,8 +1043,8 @@ function resetForm() {
   els.model.value = "gpt-image-2";
   els.customModel.value = "";
   els.count.value = "1";
-  els.size.value = "9:16";
-  els.resolutionTier.value = "1k";
+  els.size.value = "1024x1024";
+  els.resolutionTier.value = "1k-square";
   els.quality.value = "auto";
   els.promptOptimize.value = "balanced";
   els.background.value = "auto";
@@ -1105,8 +1108,15 @@ function bindEvents() {
   $$(".rail-button[data-scroll-target='history']").forEach((button) => {
     button.addEventListener("click", () => $(".inspector-history-card")?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
   });
-  els.size.addEventListener("change", syncOutputControls);
-  els.resolutionTier.addEventListener("change", syncOutputControls);
+  els.size.addEventListener("change", () => {
+    if (els.size.value !== tierToSize[els.resolutionTier.value]) {
+      els.resolutionTier.value = "auto";
+    }
+    toggleCustomSize();
+    updateCostEstimate();
+  });
+  els.sizeGroup?.addEventListener("change", syncSizeGroup);
+  els.resolutionTier.addEventListener("change", syncTierToSize);
   els.count.addEventListener("input", updateCostEstimate);
   els.quality.addEventListener("change", updateCostEstimate);
   els.width.addEventListener("input", updateCostEstimate);
@@ -1155,17 +1165,15 @@ function bindEvents() {
   $("#economyMode")?.addEventListener("click", () => {
     $("#economyMode").classList.add("active");
     $("#qualityMode")?.classList.remove("active");
-    $("#engineMode").textContent = "快速模式";
-    els.resolutionTier.value = "1k";
-    syncOutputControls();
+    $("#engineMode").textContent = "省钱模式";
+    if (els.resolutionTier.value === "auto") els.resolutionTier.value = "1k-square";
+    syncTierToSize();
   });
   $("#qualityMode")?.addEventListener("click", () => {
     $("#qualityMode").classList.add("active");
     $("#economyMode")?.classList.remove("active");
     $("#engineMode").textContent = "高清模式";
-    if (els.resolutionTier.value === "1k") els.resolutionTier.value = "2k";
-    syncOutputControls();
-    flashStatus("高清模式会提升清晰度，最终以当前服务商支持的接口尺寸为准。");
+    flashStatus("高清模式会按目标尺寸请求，生成后会完整等比例显示，不裁切上下边缘。");
   });
   els.referenceImages.addEventListener("change", async (event) => {
     await appendReferenceFiles(event.target.files, "图片");
@@ -1238,6 +1246,7 @@ initHistory();
 const savedTheme = localStorage.getItem("image2.theme") || "curry";
 document.body.dataset.theme = savedTheme;
 if (els.themeSelect) els.themeSelect.value = savedTheme;
+syncSizeGroup();
 toggleCustomSize();
 toggleCustomModel();
 updateCostEstimate();
