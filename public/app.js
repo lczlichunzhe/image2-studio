@@ -374,7 +374,7 @@ function getApiSize() {
   if (size === "auto") return size;
   const parsed = parseSize(size);
   if (!parsed) return size;
-  return normalizeRequestSize(parsed);
+  return `${ceil16(parsed.width)}x${ceil16(parsed.height)}`;
 }
 
 function getSize() {
@@ -413,23 +413,6 @@ function syncSizeGroup() {
   }
 }
 
-function normalizeRequestSize(parsed) {
-  const width = ceil16(parsed.width);
-  const height = ceil16(parsed.height);
-  const longEdge = Math.max(width, height);
-  const shortEdge = Math.min(width, height);
-  if (longEdge >= 3072) {
-    return width >= height ? "3840x2160" : "2160x3840";
-  }
-  if (longEdge > 2048) {
-    return width >= height ? "2048x1152" : "1152x2048";
-  }
-  if (longEdge > 1536 || shortEdge > 1536) {
-    return width === height ? "2048x2048" : (width >= height ? "2048x1152" : "1152x2048");
-  }
-  return `${width}x${height}`;
-}
-
 function getProviderBillingTier(size) {
   if (size === "auto") return "auto";
   const match = String(size).match(/^(\d+)x(\d+)$/);
@@ -445,7 +428,9 @@ function updateCostEstimate() {
   const apiSize = getApiSize();
   const count = getCount();
   const label = size === "auto" ? "自动尺寸" : size;
-  const apiHint = apiSize !== size ? `接口尺寸 ${apiSize}，生成后完整缩放为 ${size}，不会裁掉上下边缘。` : `接口尺寸 ${apiSize}。`;
+  const apiHint = apiSize !== size
+    ? `优先按 ${apiSize} 请求，生成后适配为 ${size}，失败时才自动降级。`
+    : `接口尺寸 ${apiSize}，失败时才自动降级。`;
   els.costEstimate.textContent = `尺寸说明：${label} · ${count} 张。${apiHint}`;
   const engineTier = $("#engineTier");
   if (engineTier) engineTier.textContent = `${getProviderBillingTier(apiSize)} · ${label}`;
@@ -635,12 +620,7 @@ async function resizeImageToTarget(image, target, apiSize) {
     const context = canvas.getContext("2d");
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, canvas.width, canvas.height);
-    const scale = Math.min(target.width / bitmap.width, target.height / bitmap.height);
-    const drawWidth = Math.round(bitmap.width * scale);
-    const drawHeight = Math.round(bitmap.height * scale);
-    const drawX = Math.round((target.width - drawWidth) / 2);
-    const drawY = Math.round((target.height - drawHeight) / 2);
-    context.drawImage(bitmap, 0, 0, bitmap.width, bitmap.height, drawX, drawY, drawWidth, drawHeight);
+    context.drawImage(bitmap, 0, 0, target.width, target.height);
     if (typeof bitmap.close === "function") bitmap.close();
     const format = els.format.value || inferFormat(src);
     const mime = format === "jpg" || format === "jpeg" ? "image/jpeg" : `image/${format}`;

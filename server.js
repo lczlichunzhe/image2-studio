@@ -226,7 +226,44 @@ function fallbackImageSize(size) {
   if (value === "3840x2160") return "2048x1152";
   if (value === "2160x3840") return "1152x2048";
   if (value === "2048x2048") return "1024x1024";
-  return "";
+  if (value === "2048x1152") return "1536x1024";
+  if (value === "1152x2048") return "1024x1536";
+  if (value === "1536x1024") return "1024x1024";
+  if (value === "1024x1536") return "1024x1024";
+
+  const match = value.match(/^(\d+)x(\d+)$/);
+  if (!match) return "";
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return "";
+  const aspect = width / height;
+  const area = width * height;
+  const candidates = [
+    [1024, 1024],
+    [1536, 1024],
+    [1024, 1536],
+    [2048, 2048],
+    [2048, 1152],
+    [1152, 2048]
+  ]
+    .map(([candidateWidth, candidateHeight]) => ({
+      width: candidateWidth,
+      height: candidateHeight,
+      value: `${candidateWidth}x${candidateHeight}`,
+      aspect: candidateWidth / candidateHeight,
+      area: candidateWidth * candidateHeight
+    }))
+    .filter((candidate) => candidate.value !== value);
+
+  candidates.sort((a, b) => {
+    const aAspect = Math.abs(Math.log(a.aspect / aspect));
+    const bAspect = Math.abs(Math.log(b.aspect / aspect));
+    const aArea = Math.abs(Math.log(a.area / area));
+    const bArea = Math.abs(Math.log(b.area / area));
+    return (aAspect * 4 + aArea) - (bAspect * 4 + bArea);
+  });
+
+  return candidates[0]?.value || "";
 }
 
 function isSizeProviderError(status, data) {
