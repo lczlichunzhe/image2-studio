@@ -1105,15 +1105,94 @@ function exportLocalEditMask(editor) {
   maskCanvas.width = editor.canvas.width;
   maskCanvas.height = editor.canvas.height;
   const ctx = maskCanvas.getContext("2d");
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
-  ctx.globalCompositeOperation = "destination-out";
-  ctx.drawImage(editor.canvas, 0, 0);
+  const overlay = editor.context.getImageData(0, 0, editor.canvas.width, editor.canvas.height);
+  const imageData = ctx.createImageData(maskCanvas.width, maskCanvas.height);
+  for (let index = 0; index < imageData.data.length; index += 4) {
+    const selected = overlay.data[index + 3] > 0;
+    imageData.data[index] = 255;
+    imageData.data[index + 1] = 255;
+    imageData.data[index + 2] = 255;
+    imageData.data[index + 3] = selected ? 0 : 255;
+  }
+  ctx.putImageData(imageData, 0, 0);
   return {
     name: "local-edit-mask.png",
     type: "image/png",
     dataUrl: maskCanvas.toDataURL("image/png")
   };
+}
+
+function createLocalEditSelectionCanvas(editor) {
+  const selectionCanvas = document.createElement("canvas");
+  selectionCanvas.width = editor.canvas.width;
+  selectionCanvas.height = editor.canvas.height;
+  const ctx = selectionCanvas.getContext("2d");
+  const overlay = editor.context.getImageData(0, 0, editor.canvas.width, editor.canvas.height);
+  const imageData = ctx.createImageData(selectionCanvas.width, selectionCanvas.height);
+  for (let index = 0; index < imageData.data.length; index += 4) {
+    const selected = overlay.data[index + 3] > 0;
+    imageData.data[index] = 255;
+    imageData.data[index + 1] = 255;
+    imageData.data[index + 2] = 255;
+    imageData.data[index + 3] = selected ? 255 : 0;
+  }
+  ctx.putImageData(imageData, 0, 0);
+  return selectionCanvas;
+}
+
+async function imageSourceToBitmap(src) {
+  const response = await fetch(src);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const blob = await response.blob();
+  return createImageBitmap(blob);
+}
+
+async function compositeLocalEditImages(images, editor) {
+  const sourceSrc = editor.image.src || editor.image.dataUrl || editor.image.url;
+  const sourceBitmap = await imageSourceToBitmap(sourceSrc);
+  const selectionCanvas = createLocalEditSelectionCanvas(editor);
+  const width = editor.canvas.width;
+  const height = editor.canvas.height;
+  try {
+    return await Promise.all(images.map(async (image) => {
+      const editedSrc = image.dataUrl || image.url;
+      const editedBitmap = await imageSourceToBitmap(editedSrc);
+      try {
+        const outputCanvas = document.createElement("canvas");
+        outputCanvas.width = width;
+        outputCanvas.height = height;
+        const output = outputCanvas.getContext("2d");
+        output.fillStyle = "#fff";
+        output.fillRect(0, 0, width, height);
+        output.drawImage(sourceBitmap, 0, 0, width, height);
+
+        const editLayer = document.createElement("canvas");
+        editLayer.width = width;
+        editLayer.height = height;
+        const edit = editLayer.getContext("2d");
+        edit.drawImage(editedBitmap, 0, 0, width, height);
+        edit.globalCompositeOperation = "destination-in";
+        edit.drawImage(selectionCanvas, 0, 0);
+        output.drawImage(editLayer, 0, 0);
+
+        const format = els.format.value || inferFormat(editedSrc);
+        const mime = format === "jpg" || format === "jpeg" ? "image/jpeg" : `image/${format}`;
+        const quality = clamp(Number(els.compression.value) / 100, 0, 1);
+        const dataUrl = mime === "image/png" ? outputCanvas.toDataURL(mime) : outputCanvas.toDataURL(mime, quality);
+        return {
+          ...image,
+          dataUrl,
+          url: undefined,
+          size: `${width}x${height}`,
+          format: inferFormat(dataUrl)
+        };
+      } finally {
+        if (typeof editedBitmap.close === "function") editedBitmap.close();
+      }
+    }));
+  } finally {
+    if (typeof sourceBitmap.close === "function") sourceBitmap.close();
+  }
 }
 
 async function imageToReferenceFile(image) {
@@ -1187,7 +1266,7 @@ async function submitLocalEdit(prompt, submitButton) {
   try {
     const source = await imageToReferenceFile(editor.image);
     const mask = exportLocalEditMask(editor);
-    const editPrompt = `${prompt}。只修改 mask 透明区域，尽量保持未选中的画面、构图、人物和光影不变。`;
+    const editPrompt = `${prompt}。这是局部修图，不是重新生成整张图。只替换 mask 透明区域内的内容；未选中区域必须保持原图不变，包括人物、文字、标题、排版、背景、光影和构图。`;
     const payload = {
       model,
       prompt: editPrompt,
@@ -1225,7 +1304,8 @@ async function submitLocalEdit(prompt, submitButton) {
     if (!images.length) throw new Error("接口没有返回修改后的图片。");
     const durationMs = Math.round(performance.now() - startedAt);
     const finalApiSize = data.apiSize || data.fallbackSize || apiSize;
-    const processedImages = (await resizeImagesToTargetSize(images, targetSize, finalApiSize)).map((image) => ({
+    const compositedImages = await compositeLocalEditImages(images, editor);
+    const processedImages = (await resizeImagesToTargetSize(compositedImages, targetSize, finalApiSize)).map((image) => ({
       ...image,
       createdAt: requestedAt,
       durationMs,
