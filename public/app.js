@@ -5,6 +5,7 @@ const state = {
   mode: "generate",
   references: [],
   mask: null,
+  localEditor: null,
   history: [],
   settings: loadSettings()
 };
@@ -371,6 +372,10 @@ function getTargetSize() {
 
 function getApiSize() {
   const size = getTargetSize();
+  return normalizeApiSize(size);
+}
+
+function normalizeApiSize(size) {
   if (size === "auto") return size;
   const parsed = parseSize(size);
   if (!parsed) return size;
@@ -601,6 +606,10 @@ function renderResults(images) {
 
 async function resizeImagesToTarget(images, apiSize = getApiSize()) {
   const targetSize = getTargetSize();
+  return resizeImagesToTargetSize(images, targetSize, apiSize);
+}
+
+async function resizeImagesToTargetSize(images, targetSize, apiSize = getApiSize()) {
   if (targetSize === "auto") return images;
   const target = parseSize(targetSize);
   if (!target) return images;
@@ -641,10 +650,10 @@ async function resizeImageToTarget(image, target, apiSize) {
 
 async function addHistory(images, meta = {}) {
   const now = meta.createdAt || new Date().toISOString();
-  const prompt = els.prompt.value.trim();
-  const model = getModel();
-  const size = getSize();
-  const quality = els.quality.value;
+  const prompt = meta.prompt ?? els.prompt.value.trim();
+  const model = meta.model || getModel();
+  const size = meta.size || getSize();
+  const quality = meta.quality || els.quality.value;
   const format = els.format.value || inferFormat(images[0]?.dataUrl || images[0]?.url);
   const entries = images.map((image) => ({
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -652,13 +661,13 @@ async function addHistory(images, meta = {}) {
     prompt,
     model,
     size,
-    requestedSize: image.requestedSize || getApiSize(),
+    requestedSize: image.requestedSize || meta.requestedSize || getApiSize(),
     fallbackSize: image.fallbackSize || "",
     quality,
     format,
     createdAt: now,
     durationMs: image.durationMs || meta.durationMs || 0,
-    apiSize: image.apiSize || getApiSize()
+    apiSize: image.apiSize || meta.apiSize || getApiSize()
   }));
   state.history = normalizeHistory([...entries, ...state.history]);
   const saved = await persistHistory(entries);
@@ -685,6 +694,7 @@ function createImageCard(image, kind) {
   const reuse = template.querySelector(".reuse-prompt");
   const copy = template.querySelector(".copy-image");
   const view = template.querySelector(".view-image");
+  const localEdit = template.querySelector(".local-edit-image");
 
   const src = image.dataUrl || image.url;
   const prompt = image.prompt || els.prompt.value.trim();
@@ -702,6 +712,7 @@ function createImageCard(image, kind) {
   });
   copy.addEventListener("click", () => copyImage(src));
   view?.addEventListener("click", () => openImageViewer({ ...image, prompt, src }));
+  localEdit?.addEventListener("click", () => openLocalEditDialog({ ...image, prompt, src }));
   img.addEventListener("dblclick", () => openImageViewer({ ...image, prompt, src }));
   card.dataset.kind = kind;
   return card;
@@ -880,6 +891,367 @@ function openImageViewer(image) {
   dialog.querySelector(".viewer-actual").addEventListener("click", () => canvas.classList.add("actual-size"));
   dialog.querySelector(".viewer-close").addEventListener("click", () => dialog.close());
   if (!dialog.open) dialog.showModal();
+}
+
+function ensureLocalEditDialog() {
+  let dialog = $("#localEditDialog");
+  if (dialog) return dialog;
+  dialog = document.createElement("dialog");
+  dialog.id = "localEditDialog";
+  dialog.className = "local-edit-dialog";
+  dialog.innerHTML = `
+    <div class="local-edit-shell">
+      <div class="local-edit-head">
+        <div>
+          <h2>局部修改</h2>
+          <p>在图上涂抹要改的区域，未涂抹区域会尽量保持不变。</p>
+        </div>
+        <button class="icon-button local-edit-close" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="local-edit-body">
+        <div class="local-edit-canvas">
+          <div class="local-edit-frame">
+            <img alt="局部修改原图" />
+            <canvas></canvas>
+          </div>
+        </div>
+        <aside class="local-edit-controls">
+          <label>
+            修改要求
+            <textarea class="local-edit-prompt" rows="7" placeholder="例如：把屋子改成红色砖墙，保留天空、树木和人物不变"></textarea>
+          </label>
+          <label>
+            画笔大小
+            <input class="local-edit-brush" type="range" min="8" max="180" value="56" />
+          </label>
+          <div class="local-edit-actions">
+            <button class="ghost-button local-edit-paint active" type="button">画笔</button>
+            <button class="ghost-button local-edit-erase" type="button">橡皮</button>
+          </div>
+          <div class="local-edit-actions">
+            <button class="ghost-button local-edit-undo" type="button">撤销</button>
+            <button class="ghost-button local-edit-clear" type="button">清空选区</button>
+          </div>
+          <button class="primary-button local-edit-submit" type="button">
+            <svg><use href="#icon-wand"></use></svg>
+            提交局部修改
+          </button>
+          <p class="local-edit-hint">黄色区域会被转成 mask。若服务商不支持 image edit / mask，会在失败诊断里返回原因。</p>
+        </aside>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(dialog);
+  return dialog;
+}
+
+function openLocalEditDialog(image) {
+  const src = image.src || image.dataUrl || image.url;
+  if (!src) {
+    flashStatus("这张图没有可编辑的图片地址", true);
+    return;
+  }
+
+  const dialog = ensureLocalEditDialog();
+  const img = dialog.querySelector("img");
+  const canvas = dialog.querySelector("canvas");
+  const promptInput = dialog.querySelector(".local-edit-prompt");
+  const brushInput = dialog.querySelector(".local-edit-brush");
+  const paintButton = dialog.querySelector(".local-edit-paint");
+  const eraseButton = dialog.querySelector(".local-edit-erase");
+  const undoButton = dialog.querySelector(".local-edit-undo");
+  const clearButton = dialog.querySelector(".local-edit-clear");
+  const submitButton = dialog.querySelector(".local-edit-submit");
+  const closeButton = dialog.querySelector(".local-edit-close");
+
+  const editor = {
+    image: { ...image, src },
+    dialog,
+    img,
+    canvas,
+    context: canvas.getContext("2d"),
+    brushSize: Number(brushInput.value) || 56,
+    erasing: false,
+    drawing: false,
+    lastPoint: null,
+    undoStack: []
+  };
+  state.localEditor = editor;
+
+  promptInput.value = "";
+  promptInput.placeholder = "例如：把屋子改成红色砖墙，保留天空、树木和人物不变";
+  paintButton.classList.add("active");
+  eraseButton.classList.remove("active");
+  submitButton.disabled = false;
+
+  img.onload = () => resetLocalEditCanvas(editor);
+  img.src = src;
+
+  closeButton.onclick = () => dialog.close();
+  brushInput.oninput = () => {
+    editor.brushSize = Number(brushInput.value) || 56;
+  };
+  paintButton.onclick = () => {
+    editor.erasing = false;
+    paintButton.classList.add("active");
+    eraseButton.classList.remove("active");
+  };
+  eraseButton.onclick = () => {
+    editor.erasing = true;
+    eraseButton.classList.add("active");
+    paintButton.classList.remove("active");
+  };
+  undoButton.onclick = () => undoLocalEditStroke(editor);
+  clearButton.onclick = () => clearLocalEditMask(editor);
+  submitButton.onclick = () => submitLocalEdit(promptInput.value.trim(), submitButton);
+
+  canvas.onpointerdown = (event) => startLocalEditStroke(event, editor);
+  canvas.onpointermove = (event) => moveLocalEditStroke(event, editor);
+  canvas.onpointerup = () => endLocalEditStroke(editor);
+  canvas.onpointercancel = () => endLocalEditStroke(editor);
+  canvas.onpointerleave = () => endLocalEditStroke(editor);
+
+  if (!dialog.open) dialog.showModal();
+}
+
+function resetLocalEditCanvas(editor) {
+  const width = editor.img.naturalWidth || 1024;
+  const height = editor.img.naturalHeight || 1024;
+  editor.canvas.width = width;
+  editor.canvas.height = height;
+  editor.context.clearRect(0, 0, width, height);
+  editor.undoStack = [];
+}
+
+function localEditPoint(event, editor) {
+  const rect = editor.canvas.getBoundingClientRect();
+  return {
+    x: (event.clientX - rect.left) * (editor.canvas.width / rect.width),
+    y: (event.clientY - rect.top) * (editor.canvas.height / rect.height)
+  };
+}
+
+function pushLocalEditUndo(editor) {
+  if (!editor?.context) return;
+  editor.undoStack.push(editor.context.getImageData(0, 0, editor.canvas.width, editor.canvas.height));
+  if (editor.undoStack.length > 24) editor.undoStack.shift();
+}
+
+function startLocalEditStroke(event, editor) {
+  event.preventDefault();
+  editor.canvas.setPointerCapture?.(event.pointerId);
+  pushLocalEditUndo(editor);
+  editor.drawing = true;
+  editor.lastPoint = localEditPoint(event, editor);
+  drawLocalEditPoint(editor.lastPoint, editor);
+}
+
+function moveLocalEditStroke(event, editor) {
+  if (!editor.drawing || !editor.lastPoint) return;
+  event.preventDefault();
+  const point = localEditPoint(event, editor);
+  const ctx = editor.context;
+  ctx.save();
+  ctx.globalCompositeOperation = editor.erasing ? "destination-out" : "source-over";
+  ctx.strokeStyle = "rgba(255, 199, 44, .74)";
+  ctx.lineWidth = editor.brushSize;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(editor.lastPoint.x, editor.lastPoint.y);
+  ctx.lineTo(point.x, point.y);
+  ctx.stroke();
+  ctx.restore();
+  editor.lastPoint = point;
+}
+
+function drawLocalEditPoint(point, editor) {
+  const ctx = editor.context;
+  ctx.save();
+  ctx.globalCompositeOperation = editor.erasing ? "destination-out" : "source-over";
+  ctx.fillStyle = "rgba(255, 199, 44, .74)";
+  ctx.beginPath();
+  ctx.arc(point.x, point.y, editor.brushSize / 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function endLocalEditStroke(editor) {
+  editor.drawing = false;
+  editor.lastPoint = null;
+}
+
+function undoLocalEditStroke(editor) {
+  const snapshot = editor.undoStack.pop();
+  if (!snapshot) return;
+  editor.context.putImageData(snapshot, 0, 0);
+}
+
+function clearLocalEditMask(editor) {
+  pushLocalEditUndo(editor);
+  editor.context.clearRect(0, 0, editor.canvas.width, editor.canvas.height);
+}
+
+function localEditHasMask(editor) {
+  const data = editor.context.getImageData(0, 0, editor.canvas.width, editor.canvas.height).data;
+  for (let index = 3; index < data.length; index += 4) {
+    if (data[index] > 0) return true;
+  }
+  return false;
+}
+
+function exportLocalEditMask(editor) {
+  const maskCanvas = document.createElement("canvas");
+  maskCanvas.width = editor.canvas.width;
+  maskCanvas.height = editor.canvas.height;
+  const ctx = maskCanvas.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+  ctx.globalCompositeOperation = "destination-out";
+  ctx.drawImage(editor.canvas, 0, 0);
+  return {
+    name: "local-edit-mask.png",
+    type: "image/png",
+    dataUrl: maskCanvas.toDataURL("image/png")
+  };
+}
+
+async function imageToReferenceFile(image) {
+  const src = image.src || image.dataUrl || image.url;
+  if (!src) throw new Error("图片地址无效。");
+  if (src.startsWith("data:")) {
+    return {
+      name: "local-edit-source.png",
+      type: src.match(/^data:([^;]+)/)?.[1] || "image/png",
+      dataUrl: src
+    };
+  }
+  try {
+    const response = await fetch(src);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    const dataUrl = await blobToDataUrl(blob);
+    return {
+      name: "local-edit-source.png",
+      type: blob.type || "image/png",
+      dataUrl
+    };
+  } catch {
+    throw new Error("无法读取这张远程图片用于局部修改。请先用历史记录里的已保存图片，或重新生成一次后再点局部修改。");
+  }
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function getImageTargetSize(image) {
+  const parsed = parseSize(image.size || image.requestedSize || image.apiSize || "");
+  if (parsed) return `${parsed.width}x${parsed.height}`;
+  if (state.localEditor?.canvas?.width && state.localEditor?.canvas?.height) {
+    return `${state.localEditor.canvas.width}x${state.localEditor.canvas.height}`;
+  }
+  return getTargetSize();
+}
+
+async function submitLocalEdit(prompt, submitButton) {
+  const editor = state.localEditor;
+  if (!editor) return;
+  if (!state.settings.apiKey) {
+    els.settingsDialog.showModal();
+    return;
+  }
+  if (!prompt) {
+    flashStatus("请输入局部修改要求。", true);
+    return;
+  }
+  if (!localEditHasMask(editor)) {
+    flashStatus("请先在图上涂抹要修改的区域。", true);
+    return;
+  }
+
+  const startedAt = performance.now();
+  const requestedAt = new Date().toISOString();
+  const model = getModel();
+  const targetSize = getImageTargetSize(editor.image);
+  const apiSize = normalizeApiSize(targetSize === "auto" ? getApiSize() : targetSize);
+  submitButton.disabled = true;
+  submitButton.innerHTML = "<span>局部修改中...</span>";
+  flashStatus("正在提交局部修改...");
+
+  try {
+    const source = await imageToReferenceFile(editor.image);
+    const mask = exportLocalEditMask(editor);
+    const editPrompt = `${prompt}。只修改 mask 透明区域，尽量保持未选中的画面、构图、人物和光影不变。`;
+    const payload = {
+      model,
+      prompt: editPrompt,
+      n: 1,
+      size: apiSize,
+      quality: els.quality.value,
+      background: els.background.value,
+      output_format: els.format.value,
+      moderation: els.moderation.value,
+      images: [source],
+      mask
+    };
+    if (els.format.value !== "png") payload.output_compression = Number(els.compression.value);
+    if (
+      els.inputFidelity.value !== "auto" &&
+      !["gpt-image-2", "gpt-image-1-mini"].includes(model)
+    ) {
+      payload.input_fidelity = els.inputFidelity.value;
+    }
+
+    const response = await fetch(apiUrl("/api/images"), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": state.settings.apiKey,
+        "x-api-base-url": state.settings.apiBaseUrl || "https://api.openai.com/v1",
+        "x-openai-organization": state.settings.organization || "",
+        "x-openai-project": state.settings.project || ""
+      },
+      body: JSON.stringify(payload)
+    });
+    const data = await readJsonResponse(response);
+    if (!response.ok) throw new Error(data.error || data.details?.error?.message || "局部修改失败。");
+    const images = (data.data || []).filter((item) => item.dataUrl || item.url);
+    if (!images.length) throw new Error("接口没有返回修改后的图片。");
+    const durationMs = Math.round(performance.now() - startedAt);
+    const finalApiSize = data.apiSize || data.fallbackSize || apiSize;
+    const processedImages = (await resizeImagesToTargetSize(images, targetSize, finalApiSize)).map((image) => ({
+      ...image,
+      createdAt: requestedAt,
+      durationMs,
+      apiSize: image.apiSize || finalApiSize,
+      requestedSize: image.requestedSize || data.requestedSize || apiSize,
+      fallbackSize: image.fallbackSize || data.fallbackSize || ""
+    }));
+    renderResults(processedImages);
+    await addHistory(processedImages, {
+      prompt: `局部修改：${prompt}`,
+      model,
+      size: targetSize,
+      quality: els.quality.value,
+      apiSize: finalApiSize,
+      requestedSize: data.requestedSize || apiSize,
+      createdAt: requestedAt,
+      durationMs
+    });
+    editor.dialog.close();
+    flashStatus(`局部修改完成：1 张图片，用时 ${formatDuration(durationMs)}。`);
+  } catch (error) {
+    flashStatus(readableLocalFetchError(error), true);
+  } finally {
+    submitButton.disabled = false;
+    submitButton.innerHTML = '<svg><use href="#icon-wand"></use></svg>提交局部修改';
+  }
 }
 
 function escapeHtml(value) {
