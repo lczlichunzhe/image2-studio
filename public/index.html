@@ -115,6 +115,24 @@
             </div>
             <label for="avoid">避免出现</label>
             <input id="avoid" type="text" placeholder="低清晰度、文字错误、变形手指" />
+            <div class="workflow-grid" aria-label="创作预设">
+              <button type="button" class="workflow-chip active" data-workflow="fast">
+                <b>省钱快出</b>
+                <span>1K 方图 · 快速试稿</span>
+              </button>
+              <button type="button" class="workflow-chip" data-workflow="standard">
+                <b>标准成片</b>
+                <span>1K 竖图 · 稳定细节</span>
+              </button>
+              <button type="button" class="workflow-chip" data-workflow="cover">
+                <b>封面海报</b>
+                <span>小红书/短视频构图</span>
+              </button>
+              <button type="button" class="workflow-chip" data-workflow="product">
+                <b>产品精修</b>
+                <span>商业光影 · 干净主体</span>
+              </button>
+            </div>
           </section>
 
           <section class="panel-section edit-only hidden">
@@ -377,11 +395,13 @@
                 <input id="historySearch" type="search" placeholder="搜索提示词 / 尺寸 / 模型" />
                 <select id="historyFilter">
                   <option value="all">全部</option>
+                  <option value="favorite">收藏</option>
                   <option value="1k">1K</option>
                   <option value="2k">2K</option>
                   <option value="4k">4K</option>
                   <option value="today">今天</option>
                 </select>
+                <button class="mini-button" id="exportHistory" type="button">导出</button>
               </div>
               <div class="history-grid side-history-grid" id="history"></div>
             </div>
@@ -390,7 +410,7 @@
                 <span>失败诊断</span>
                 <span>方案</span>
               </div>
-              <p>上游失败时会显示原因、Base URL 检查、网络建议和可重试参数。</p>
+              <p id="diagnosisText">上游失败时会显示原因、Base URL 检查、网络建议和可重试参数。</p>
             </div>
         </aside>
 

@@ -536,6 +536,55 @@ input[type="range"] { padding: 0; accent-color: var(--gold); }
   box-shadow: var(--soft-shadow);
 }
 
+.workflow-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.workflow-chip {
+  min-height: 62px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255,255,255,.68);
+  color: var(--ink);
+  text-align: left;
+  cursor: var(--basketball-cursor);
+  transition: transform .16s ease, border-color .16s ease, background .16s ease, box-shadow .16s ease;
+}
+
+.workflow-chip b,
+.workflow-chip span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-chip b {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.workflow-chip span {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.workflow-chip:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--soft-shadow);
+}
+
+.workflow-chip.active {
+  border-color: color-mix(in srgb, var(--gold) 64%, var(--line));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--gold) 24%, white), rgba(255,255,255,.82));
+}
+
 .dropzone {
   min-height: 96px;
   border: 1px dashed color-mix(in srgb, var(--blue) 32%, transparent);
@@ -938,7 +987,7 @@ input[type="range"] { padding: 0; accent-color: var(--gold); }
   position: static;
   width: 100%;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 78px;
+  grid-template-columns: minmax(0, 1fr) 76px 56px;
 }
 .side-history-grid {
   position: static;
@@ -1076,8 +1125,32 @@ input[type="range"] { padding: 0; accent-color: var(--gold); }
   font-size: 15px;
   opacity: 0;
 }
+.history-favorite {
+  position: absolute;
+  right: 34px;
+  top: 7px;
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  border-radius: 999px;
+  background: rgba(255,255,255,.86);
+  color: color-mix(in srgb, var(--muted) 90%, var(--ink));
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0;
+  cursor: var(--basketball-cursor);
+}
+.history-favorite.active {
+  opacity: .98;
+  color: var(--deep);
+  border-color: color-mix(in srgb, var(--gold) 70%, var(--line));
+  background: linear-gradient(180deg, var(--gold-2), var(--gold));
+}
 .history-thumb:hover .history-delete,
-.history-thumb:focus-visible .history-delete {
+.history-thumb:focus-visible .history-delete,
+.history-thumb:hover .history-favorite,
+.history-thumb:focus-visible .history-favorite {
   opacity: .95;
 }
 .history-thumb.is-broken::before {

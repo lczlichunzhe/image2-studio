@@ -3,6 +3,7 @@ const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
 const state = {
   mode: "generate",
+  workflow: "fast",
   references: [],
   mask: null,
   history: [],
@@ -61,11 +62,13 @@ const els = {
   historyCount: $("#historyCount"),
   historySearch: $("#historySearch"),
   historyFilter: $("#historyFilter"),
+  exportHistory: $("#exportHistory"),
   clearResults: $("#clearResults"),
   clearHistory: $("#clearHistory"),
   statusText: $("#statusText"),
   progress: $("#progress"),
-  costEstimate: $("#costEstimate")
+  costEstimate: $("#costEstimate"),
+  diagnosisText: $("#diagnosisText")
 };
 
 const presets = {
@@ -131,6 +134,45 @@ const promptOptimizeText = {
   raw: ""
 };
 
+const workflowPresets = {
+  fast: {
+    label: "省钱快出",
+    sizeGroup: "regular",
+    tier: "1k-square",
+    quality: "auto",
+    optimize: "balanced",
+    count: "1",
+    hint: "适合快速试稿和看方向，会优先使用 1K 方图。"
+  },
+  standard: {
+    label: "标准成片",
+    sizeGroup: "regular",
+    tier: "1k-tall",
+    quality: "high",
+    optimize: "precise",
+    count: "1",
+    hint: "适合人物、海报和完整构图，默认竖版 1K。"
+  },
+  cover: {
+    label: "封面海报",
+    sizeGroup: "xhs",
+    tier: "xhs-post-tall",
+    quality: "high",
+    optimize: "cinema",
+    count: "1",
+    hint: "适合小红书、视频封面和带标题空间的画面。"
+  },
+  product: {
+    label: "产品精修",
+    sizeGroup: "ecommerce",
+    tier: "ecom-square",
+    quality: "high",
+    optimize: "product",
+    count: "1",
+    hint: "适合商品主图、产品海报和干净商业光影。"
+  }
+};
+
 function loadJson(key, fallback) {
   try {
     const value = JSON.parse(localStorage.getItem(key)) ?? fallback;
@@ -155,7 +197,8 @@ function normalizeHistory(items) {
       durationMs: Number(item.durationMs) || 0,
       apiSize: item.apiSize || "",
       requestedSize: item.requestedSize || "",
-      fallbackSize: item.fallbackSize || ""
+      fallbackSize: item.fallbackSize || "",
+      favorite: Boolean(item.favorite)
     }))
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
@@ -413,6 +456,25 @@ function syncSizeGroup() {
   }
 }
 
+function applyWorkflowPreset(name, silent = false) {
+  const preset = workflowPresets[name] || workflowPresets.fast;
+  state.workflow = name in workflowPresets ? name : "fast";
+  $$(".workflow-chip").forEach((button) => {
+    button.classList.toggle("active", button.dataset.workflow === state.workflow);
+  });
+  if (els.sizeGroup) els.sizeGroup.value = preset.sizeGroup;
+  syncSizeGroup();
+  els.resolutionTier.value = preset.tier;
+  syncTierToSize();
+  els.quality.value = preset.quality;
+  els.promptOptimize.value = preset.optimize;
+  els.count.value = preset.count;
+  const engineMode = $("#engineMode");
+  if (engineMode) engineMode.textContent = preset.label;
+  updateCostEstimate();
+  if (!silent) flashStatus(`已切换到${preset.label}：${preset.hint}`);
+}
+
 function getProviderBillingTier(size) {
   if (size === "auto") return "auto";
   const match = String(size).match(/^(\d+)x(\d+)$/);
@@ -468,6 +530,30 @@ function getCount() {
 
 function round16(value) {
   return Math.round(value / 16) * 16;
+}
+
+function enhancePromptText(base) {
+  const text = String(base || "").trim();
+  if (!text) return "";
+  const workflow = workflowPresets[state.workflow] || workflowPresets.fast;
+  const optimize = promptOptimizeText[els.promptOptimize.value] || promptOptimizeText.balanced;
+  const size = getSize();
+  const isCover = state.workflow === "cover" || /封面|海报|小红书|标题|cover|poster/i.test(text);
+  const isProduct = state.workflow === "product" || /产品|商品|电商|主图|product/i.test(text);
+  const composition = isCover
+    ? "保留清晰标题留白区，主体突出，封面构图，视觉中心明确"
+    : isProduct
+      ? "主体居中，边缘清晰，背景干净，商业摄影构图"
+      : "主体明确，前中后景有层次，构图稳定，画面完成度高";
+  const detail = [
+    text,
+    composition,
+    "真实光影，细节丰富，材质可信，色彩干净高级",
+    optimize,
+    `输出比例参考 ${size}`,
+    workflow.hint
+  ].filter(Boolean);
+  return Array.from(new Set(detail)).join("，");
 }
 
 function buildPrompt() {
@@ -658,7 +744,8 @@ async function addHistory(images, meta = {}) {
     format,
     createdAt: now,
     durationMs: image.durationMs || meta.durationMs || 0,
-    apiSize: image.apiSize || getApiSize()
+    apiSize: image.apiSize || getApiSize(),
+    favorite: Boolean(image.favorite || meta.favorite)
   }));
   state.history = normalizeHistory([...entries, ...state.history]);
   const saved = await persistHistory(entries);
@@ -760,6 +847,13 @@ function createHistoryThumb(item) {
   const meta = document.createElement("span");
   meta.textContent = imageMetaLine(item);
 
+  const favorite = document.createElement("button");
+  favorite.className = `thumb-favorite history-favorite${item.favorite ? " active" : ""}`;
+  favorite.type = "button";
+  favorite.textContent = "★";
+  favorite.title = item.favorite ? "取消收藏" : "收藏这张图";
+  favorite.setAttribute("aria-label", favorite.title);
+
   const remove = document.createElement("button");
   remove.className = "thumb-delete history-delete";
   remove.type = "button";
@@ -768,7 +862,7 @@ function createHistoryThumb(item) {
   remove.setAttribute("aria-label", "删除这条历史");
 
   info.append(title, meta);
-  button.append(img, info, remove);
+  button.append(img, info, favorite, remove);
   button.addEventListener("click", () => {
     renderResults([item]);
     if (item.prompt) els.prompt.value = item.prompt;
@@ -784,6 +878,10 @@ function createHistoryThumb(item) {
   remove.addEventListener("click", async (event) => {
     event.stopPropagation();
     await deleteHistoryItem(item.id);
+  });
+  favorite.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    await toggleHistoryFavorite(item.id);
   });
   button.addEventListener("dblclick", () => openImageViewer(item));
   return button;
@@ -832,6 +930,59 @@ async function deleteHistoryItem(id) {
   }
   renderHistory();
   flashStatus("已删除这条历史");
+}
+
+async function toggleHistoryFavorite(id) {
+  const item = state.history.find((entry) => entry.id === id);
+  if (!item) return;
+  item.favorite = !item.favorite;
+  try {
+    await writeHistoryToDb([item]);
+  } catch {
+    localStorage.setItem("image2.history", JSON.stringify(state.history));
+  }
+  renderHistory();
+  flashStatus(item.favorite ? "已收藏这张图" : "已取消收藏");
+}
+
+function getFilteredHistoryItems() {
+  const query = (els.historySearch?.value || "").trim().toLowerCase();
+  const filter = els.historyFilter?.value || "all";
+  const today = new Date().toISOString().slice(0, 10);
+  return state.history.filter((item) => {
+    const tier = getHistorySizeTier(item);
+    const haystack = [item.prompt, item.size, item.apiSize, item.model, item.quality, tier].filter(Boolean).join(" ").toLowerCase();
+    const matchesQuery = !query || haystack.includes(query);
+    const matchesFilter =
+      filter === "all" ||
+      (filter === "favorite" && item.favorite) ||
+      (filter === "1k" && tier === "1k") ||
+      (filter === "2k" && tier === "2k") ||
+      (filter === "4k" && tier === "4k") ||
+      (filter === "today" && String(item.createdAt || "").startsWith(today));
+    return matchesQuery && matchesFilter;
+  });
+}
+
+function exportFilteredHistory() {
+  const items = getFilteredHistoryItems();
+  if (!items.length) {
+    flashStatus("当前筛选下没有可导出的历史。", true);
+    return;
+  }
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    total: items.length,
+    items
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `image2-history-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+  flashStatus(`已导出 ${items.length} 条历史记录。`);
 }
 
 function openImageViewer(image) {
@@ -909,21 +1060,7 @@ async function copyImage(src) {
 
 function renderHistory() {
   els.history.innerHTML = "";
-  const query = (els.historySearch?.value || "").trim().toLowerCase();
-  const filter = els.historyFilter?.value || "all";
-  const today = new Date().toISOString().slice(0, 10);
-  const filtered = state.history.filter((item) => {
-    const tier = getHistorySizeTier(item);
-    const haystack = [item.prompt, item.size, item.apiSize, item.model, item.quality, tier].filter(Boolean).join(" ").toLowerCase();
-    const matchesQuery = !query || haystack.includes(query);
-    const matchesFilter =
-      filter === "all" ||
-      (filter === "1k" && tier === "1k") ||
-      (filter === "2k" && tier === "2k") ||
-      (filter === "4k" && tier === "4k") ||
-      (filter === "today" && String(item.createdAt || "").startsWith(today));
-    return matchesQuery && matchesFilter;
-  });
+  const filtered = getFilteredHistoryItems();
   els.historyCount.textContent = renderHistoryCountText(state.history.length, filtered.length);
   for (const item of filtered) {
     els.history.appendChild(createHistoryThumb(item));
@@ -938,9 +1075,45 @@ function renderHistoryCountText(total, shown) {
   return `${total} 条记录${shown !== total ? ` / 显示 ${shown}` : ""}`;
 }
 
+function diagnoseMessage(message) {
+  const text = String(message || "");
+  const lower = text.toLowerCase();
+  if (/401|403|unauthorized|forbidden|api key|invalid key|鉴权|权限|认证/.test(lower)) {
+    return "可能是 API Key、组织/项目或 Base URL 鉴权不匹配。建议重新打开接口配置，确认 Key 属于当前服务商，并先点“测试连接”。";
+  }
+  if (/quota|billing|balance|insufficient|余额|额度|账单/.test(lower)) {
+    return "可能是余额、额度或账单限制。建议先去服务商后台检查余额与模型权限，再降低数量或切到省钱快出。";
+  }
+  if (/size|dimension|resolution|unsupported|invalid|尺寸|分辨率/.test(lower)) {
+    return "可能是当前服务商不支持这个尺寸。建议改用 1K 方图或自动尺寸，再逐步尝试更大的规格。";
+  }
+  if (/model|not found|does not exist|模型/.test(lower)) {
+    return "可能是模型 ID 不存在或当前 Key 没有权限。建议切回 gpt-image-2，或确认自定义模型名称完全正确。";
+  }
+  if (/failed to fetch|fetch failed|network|timeout|proxy|连接|网络|超时/.test(lower)) {
+    return "可能是本地服务、代理或网络连接问题。建议确认网站是从 http://localhost:4173 打开的，并检查代理/梯子是否影响接口域名。";
+  }
+  if (/json|html|非 json|unexpected token/.test(lower)) {
+    return "接口返回的不是标准 JSON，常见原因是 Base URL 填到了网页地址、代理网关报错页，或服务商兼容格式不同。";
+  }
+  return "暂未匹配到明确类型。建议复制完整报错，先测试连接，再尝试 1K 方图、数量 1、quality auto 的最小请求。";
+}
+
+function updateDiagnosis(message, isError = false) {
+  if (!els.diagnosisText) return;
+  if (isError) {
+    els.diagnosisText.textContent = `原因判断：${diagnoseMessage(message)} 原始信息：${message}`;
+    return;
+  }
+  if (/完成|正常|已切换|已导出|已收藏|已取消|已重置|已清空/.test(String(message || ""))) {
+    els.diagnosisText.textContent = "最近状态正常。生成失败时这里会自动显示原因判断、网络建议和可重试参数。";
+  }
+}
+
 function flashStatus(message, isError = false) {
   els.statusText.textContent = message;
   els.statusText.classList.toggle("error-text", isError);
+  updateDiagnosis(message, isError);
 }
 
 function renderFilePreview(container, files) {
@@ -1039,6 +1212,7 @@ function resetForm() {
   els.maskImage.value = "";
   renderFilePreview(els.refPreview, []);
   renderFilePreview(els.maskPreview, []);
+  applyWorkflowPreset("fast", true);
   toggleCustomSize();
   toggleCustomModel();
   updateCostEstimate();
@@ -1088,6 +1262,9 @@ function bindEvents() {
   $$(".rail-button[data-scroll-target='history']").forEach((button) => {
     button.addEventListener("click", () => $(".inspector-history-card")?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
   });
+  $$(".workflow-chip").forEach((button) => {
+    button.addEventListener("click", () => applyWorkflowPreset(button.dataset.workflow));
+  });
   els.size.addEventListener("change", () => {
     if (els.size.value !== tierToSize[els.resolutionTier.value]) {
       els.resolutionTier.value = "auto";
@@ -1106,6 +1283,7 @@ function bindEvents() {
   els.customModel.addEventListener("input", updateCostEstimate);
   els.historySearch?.addEventListener("input", renderHistory);
   els.historyFilter?.addEventListener("change", renderHistory);
+  els.exportHistory?.addEventListener("click", exportFilteredHistory);
   els.generate.addEventListener("click", generateImages);
   els.resetForm.addEventListener("click", resetForm);
   els.clearResults.addEventListener("click", () => {
@@ -1145,14 +1323,12 @@ function bindEvents() {
   $("#economyMode")?.addEventListener("click", () => {
     $("#economyMode").classList.add("active");
     $("#qualityMode")?.classList.remove("active");
-    $("#engineMode").textContent = "省钱模式";
-    if (els.resolutionTier.value === "auto") els.resolutionTier.value = "1k-square";
-    syncTierToSize();
+    applyWorkflowPreset("fast");
   });
   $("#qualityMode")?.addEventListener("click", () => {
     $("#qualityMode").classList.add("active");
     $("#economyMode")?.classList.remove("active");
-    $("#engineMode").textContent = "高清模式";
+    applyWorkflowPreset("standard", true);
     flashStatus("高清模式会按目标尺寸请求，生成后会完整等比例显示，不裁切上下边缘。");
   });
   els.referenceImages.addEventListener("change", async (event) => {
@@ -1200,9 +1376,8 @@ function bindEvents() {
       flashStatus("提示词已足够完整");
       return;
     }
-    const optimize = promptOptimizeText[els.promptOptimize.value] || promptOptimizeText.balanced;
-    els.prompt.value = `${base}，${optimize}`;
-    flashStatus("提示词已润色");
+    els.prompt.value = enhancePromptText(base);
+    flashStatus("提示词已按当前创作预设增强");
   });
 }
 
@@ -1226,7 +1401,7 @@ initHistory();
 const savedTheme = localStorage.getItem("image2.theme") || "curry";
 document.body.dataset.theme = savedTheme;
 if (els.themeSelect) els.themeSelect.value = savedTheme;
-syncSizeGroup();
+applyWorkflowPreset("fast", true);
 toggleCustomSize();
 toggleCustomModel();
 updateCostEstimate();
